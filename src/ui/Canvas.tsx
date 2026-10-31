@@ -26,7 +26,13 @@ import {
   type Node,
   type NodeProps,
 } from "@xyflow/react";
-import type { Direction, Flowchart, Link, Shape } from "../core/flowchart";
+import {
+  SHAPE_DELIMS,
+  type Direction,
+  type Flowchart,
+  type Link,
+  type Shape,
+} from "../core/flowchart";
 import type { Layout, Pos } from "../core/layoutBlock";
 import { nodeSize } from "../core/autoLayout";
 
@@ -40,6 +46,7 @@ export interface CanvasProps {
   fitSignal: number;
   onMove(positions: Layout): void;
   onRename(id: string, label: string): void;
+  onChangeShape(id: string, shape: Shape): void;
   onEdgeLabel(edgeId: string, label: string): void;
   onConnect(from: string, to: string): void;
   onAddNode(pos: Pos): void;
@@ -79,6 +86,7 @@ export function Canvas(props: CanvasProps) {
   const [nodes, setNodes] = useState<Node<ShapeData>[]>([]);
   const [edges, setEdges] = useState<Edge<EdgeData>[]>([]);
   const [editingEdge, setEditingEdge] = useState<string>();
+  const [menu, setMenu] = useState<{ id: string; x: number; y: number }>();
 
   // Derive React Flow state from the parsed text + layout, keeping the selection.
   useEffect(() => {
@@ -195,6 +203,13 @@ export function Canvas(props: CanvasProps) {
               es.map((e) => e.id),
             )
           }
+          onNodeContextMenu={(e, n) => {
+            e.preventDefault();
+            if (readOnly) return;
+            setMenu({ id: n.id, x: e.clientX, y: e.clientY });
+          }}
+          onPaneClick={() => setMenu(undefined)}
+          onMoveStart={() => setMenu(undefined)}
           onEdgeDoubleClick={(_, e) => !readOnly && setEditingEdge(e.id)}
           nodesDraggable={!readOnly}
           nodesConnectable={!readOnly}
@@ -210,10 +225,112 @@ export function Canvas(props: CanvasProps) {
           <Background variant={BackgroundVariant.Dots} gap={18} size={1.2} />
           <Controls showInteractive={false} />
         </ReactFlow>
+        {menu && (
+          <ShapeMenu
+            x={menu.x}
+            y={menu.y}
+            current={fc.nodes.find((n) => n.id === menu.id)?.shape}
+            onPick={(shape) => {
+              setMenu(undefined);
+              props.onChangeShape(menu.id, shape);
+            }}
+            onClose={() => setMenu(undefined)}
+          />
+        )}
       </div>
     </CanvasCtx.Provider>
   );
 }
+
+// --- Shape context menu --------------------------------------------------------
+
+const SHAPE_OPTIONS: { shape: Shape; name: string }[] = [
+  { shape: "rect", name: "Rectangle" },
+  { shape: "round", name: "Rounded" },
+  { shape: "stadium", name: "Stadium" },
+  { shape: "subroutine", name: "Subroutine" },
+  { shape: "cylinder", name: "Database" },
+  { shape: "circle", name: "Circle" },
+  { shape: "double-circle", name: "Double circle" },
+  { shape: "asymmetric", name: "Asymmetric" },
+  { shape: "diamond", name: "Decision" },
+  { shape: "hexagon", name: "Hexagon" },
+  { shape: "parallelogram", name: "Parallelogram" },
+  { shape: "parallelogram-alt", name: "Parallelogram (alt)" },
+  { shape: "trapezoid", name: "Trapezoid" },
+  { shape: "trapezoid-alt", name: "Trapezoid (alt)" },
+];
+
+function ShapeMenu(props: {
+  x: number;
+  y: number;
+  current?: Shape;
+  onPick(shape: Shape): void;
+  onClose(): void;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState({ left: props.x, top: props.y });
+
+  // Keep the menu inside the viewport.
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    setPos({
+      left: Math.max(8, Math.min(props.x, window.innerWidth - r.width - 8)),
+      top: Math.max(8, Math.min(props.y, window.innerHeight - r.height - 8)),
+    });
+  }, [props.x, props.y]);
+
+  useEffect(() => {
+    const down = (e: PointerEvent) => {
+      if (!ref.current?.contains(e.target as Node_)) props.onClose();
+    };
+    const key = (e: KeyboardEvent) => e.key === "Escape" && props.onClose();
+    window.addEventListener("pointerdown", down, true);
+    window.addEventListener("keydown", key);
+    window.addEventListener("blur", props.onClose);
+    return () => {
+      window.removeEventListener("pointerdown", down, true);
+      window.removeEventListener("keydown", key);
+      window.removeEventListener("blur", props.onClose);
+    };
+  }, [props.onClose]);
+
+  return (
+    <div
+      ref={ref}
+      className="context-menu"
+      style={pos}
+      role="menu"
+      onContextMenu={(e) => e.preventDefault()}
+    >
+      <div className="context-menu-title">Change type</div>
+      {SHAPE_OPTIONS.map(({ shape, name }) => {
+        const [open, close] = SHAPE_DELIMS[shape];
+        return (
+          <button
+            key={shape}
+            role="menuitemradio"
+            aria-checked={shape === props.current}
+            className={`context-menu-item${shape === props.current ? " active" : ""}`}
+            onClick={() => props.onPick(shape)}
+          >
+            <span className="shape-icon">
+              <ShapeOutline shape={shape} w={26} h={16} />
+            </span>
+            <span className="context-menu-name">{name}</span>
+            <code>
+              {open}…{close}
+            </code>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+type Node_ = globalThis.Node;
 
 // --- Inline label editor -------------------------------------------------------
 
@@ -264,7 +381,7 @@ function LabelInput(props: {
 // --- Nodes ---------------------------------------------------------------------
 
 function ShapeOutline({ shape, w, h }: { shape: Shape; w: number; h: number }) {
-  const s = 8; // slant / inset
+  const s = Math.min(8, w / 6); // slant / inset (smaller for menu icons)
   let el: React.ReactNode;
   switch (shape) {
     case "round":

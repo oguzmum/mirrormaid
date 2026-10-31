@@ -5,6 +5,7 @@ import {
   addEdge,
   addNode,
   applyChanges,
+  changeNodeShape,
   deleteElements,
   renameNode,
   setEdgeLabel,
@@ -131,6 +132,38 @@ describe("patches", () => {
     const src = "flowchart LR\n  A --> B\n";
     expect(run(src, (fc) => renameNode(fc, "B", "Done (ok)"))).toBe(
       'flowchart LR\n  A --> B["Done (ok)"]\n',
+    );
+  });
+
+  it("changes a node's shape by swapping its brackets", () => {
+    const src = "flowchart LR\n  A[Start] --> B\n  A:::hot\n";
+    expect(run(src, (fc) => changeNodeShape(src, fc, "A", "diamond"))).toBe(
+      "flowchart LR\n  A{Start} --> B\n  A:::hot\n",
+    );
+    expect(run(src, (fc) => changeNodeShape(src, fc, "A", "trapezoid"))).toBe(
+      "flowchart LR\n  A[/Start\\] --> B\n  A:::hot\n",
+    );
+    const round = run(src, (fc) => changeNodeShape(src, fc, "A", "circle"));
+    expect(parseFlowchart(round).nodes[0]).toMatchObject({
+      shape: "circle",
+      label: "Start",
+    });
+  });
+
+  it("keeps quoted labels and quotes when the new brackets need it", () => {
+    const src = 'flowchart LR\n  A["x"] --> B(a]b)\n';
+    expect(run(src, (fc) => changeNodeShape(src, fc, "A", "stadium"))).toBe(
+      'flowchart LR\n  A(["x"]) --> B(a]b)\n',
+    );
+    expect(run(src, (fc) => changeNodeShape(src, fc, "B", "rect"))).toBe(
+      'flowchart LR\n  A["x"] --> B["a]b"]\n',
+    );
+  });
+
+  it("gives a bare node a shape with its id as label", () => {
+    const src = "flowchart LR\n  A --> B\n";
+    expect(run(src, (fc) => changeNodeShape(src, fc, "B", "round"))).toBe(
+      "flowchart LR\n  A --> B(B)\n",
     );
   });
 

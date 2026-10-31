@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ReactFlowProvider } from "@xyflow/react";
-import { parseFlowchart, type Flowchart } from "./core/flowchart";
+import { parseFlowchart, type Flowchart, type Shape } from "./core/flowchart";
 import { joinFile, splitFile, type Layout, type Pos } from "./core/layoutBlock";
 import {
   addEdge,
@@ -8,6 +8,7 @@ import {
   deleteElements,
   nextNodeId,
   renameNode,
+  changeNodeShape,
   setEdgeLabel,
   type Change,
 } from "./core/patches";
@@ -166,6 +167,8 @@ export function App() {
   };
   const onRename = (id: string, label: string) =>
     patch(renameNode(fc, id, label));
+  const onChangeShape = (id: string, shape: Shape) =>
+    patch(changeNodeShape(code, fc, id, shape));
   const onEdgeLabel = (edgeId: string, label: string) => {
     const edge = fc.edges.find((e) => e.id === edgeId);
     if (edge) patch(setEdgeLabel(fc, edge, label));
@@ -645,6 +648,7 @@ export function App() {
               fitSignal={fitSignal}
               onMove={onMove}
               onRename={onRename}
+              onChangeShape={onChangeShape}
               onEdgeLabel={onEdgeLabel}
               onConnect={onConnect}
               onAddNode={onAddNode}
@@ -660,7 +664,8 @@ export function App() {
           {fc.ok && (
             <div className="hint">
               <kbd>Double-click</kbd> canvas to add · <kbd>Double-click</kbd> to
-              rename · <kbd>Drag</kbd> handle to connect · <kbd>⌫</kbd> delete
+              rename · <kbd>Right-click</kbd> to change type · <kbd>Drag</kbd>{" "}
+              handle to connect · <kbd>⌫</kbd> delete
             </div>
           )}
         </section>

@@ -123,6 +123,44 @@ export function renameNode(fc: Flowchart, id: string, label: string): Change[] {
   ];
 }
 
+/**
+ * Changes a node's shape by swapping the brackets of its defining ref, e.g.
+ * `A[Start]` → `A{Start}`. A quoted label is kept byte for byte; an unquoted one
+ * is re-quoted if the new brackets require it. A bare node gets its id as label.
+ */
+export function changeNodeShape(
+  text: string,
+  fc: Flowchart,
+  id: string,
+  shape: Shape,
+): Change[] {
+  const node = fc.nodes.find((n) => n.id === id);
+  if (!node || node.shape === shape) return [];
+  const [open, close] = SHAPE_DELIMS[shape];
+  const def = node.definedBy;
+  if (def?.textSpan && def.shape) {
+    const [oldOpen, oldClose] = SHAPE_DELIMS[def.shape];
+    const raw = text.slice(def.textSpan.from, def.textSpan.to);
+    const quoted = /^".*"$/s.test(raw.trim());
+    const label = quoted ? raw : formatLabel(def.label ?? node.label, shape);
+    return [
+      {
+        from: def.textSpan.from - oldOpen.length,
+        to: def.textSpan.to + oldClose.length,
+        insert: `${open}${label}${close}`,
+      },
+    ];
+  }
+  const first = node.refs[0];
+  return [
+    {
+      from: first.idSpan.to,
+      to: first.idSpan.to,
+      insert: `${open}${formatLabel(node.label, shape)}${close}`,
+    },
+  ];
+}
+
 // --- Edges -------------------------------------------------------------------
 
 export function addEdge(
