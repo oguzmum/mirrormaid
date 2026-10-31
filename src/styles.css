@@ -1,0 +1,515 @@
+:root {
+  --bg: #f7f7f8;
+  --panel: #ffffff;
+  --panel-2: #fbfbfc;
+  --fg: #18181b;
+  --muted: #71717a;
+  --subtle: #a1a1aa;
+  --border: #e4e4e7;
+  --border-strong: #d4d4d8;
+  --hover: #f4f4f5;
+  --accent: #4f46e5;
+  --accent-fg: #ffffff;
+  --accent-soft: #eef2ff;
+  --node-fill: #ffffff;
+  --node-stroke: #52525b;
+  --edge: #71717a;
+  --grid: #d4d4d8;
+  --kw: #4f46e5;
+  --op: #0369a1;
+  --str: #15803d;
+  --error: #dc2626;
+  --error-soft: #fef2f2;
+  --warn: #b45309;
+  --ok: #16a34a;
+  --shadow: 0 1px 2px rgb(0 0 0 / 0.05);
+  --shadow-md: 0 4px 12px rgb(0 0 0 / 0.08), 0 1px 3px rgb(0 0 0 / 0.06);
+  --radius: 6px;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0f0f11;
+    --panel: #18181b;
+    --panel-2: #1c1c20;
+    --fg: #e4e4e7;
+    --muted: #a1a1aa;
+    --subtle: #71717a;
+    --border: #27272a;
+    --border-strong: #3f3f46;
+    --hover: #232327;
+    --accent: #818cf8;
+    --accent-fg: #0f0f11;
+    --accent-soft: #1e1b4b;
+    --node-fill: #18181b;
+    --node-stroke: #a1a1aa;
+    --edge: #8b8b94;
+    --grid: #2e2e33;
+    --kw: #a5b4fc;
+    --op: #7dd3fc;
+    --str: #86efac;
+    --error: #f87171;
+    --error-soft: #2a1414;
+    --warn: #fbbf24;
+    --ok: #4ade80;
+    --shadow: 0 1px 2px rgb(0 0 0 / 0.4);
+    --shadow-md: 0 4px 12px rgb(0 0 0 / 0.5);
+    color-scheme: dark;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font:
+    13px/1.45 system-ui,
+    -apple-system,
+    "Segoe UI",
+    Roboto,
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+button,
+input {
+  font: inherit;
+  color: inherit;
+}
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+/* --- Toolbar ------------------------------------------------------------------ */
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 46px;
+  padding: 0 10px;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel);
+  flex-shrink: 0;
+}
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-right: 10px;
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+.brand-mark {
+  width: 18px;
+  height: 18px;
+  color: var(--accent);
+}
+.toolbar button {
+  height: 28px;
+  padding: 0 10px;
+  border-radius: var(--radius);
+  border: 1px solid transparent;
+  background: transparent;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.toolbar button:hover:not(:disabled) {
+  background: var(--hover);
+}
+.toolbar button:disabled {
+  color: var(--subtle);
+  cursor: default;
+}
+.toolbar button.outline {
+  border-color: var(--border-strong);
+  background: var(--panel);
+  box-shadow: var(--shadow);
+}
+.toolbar button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-fg);
+  font-weight: 500;
+}
+.toolbar button.primary:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 88%, black);
+}
+.sep {
+  width: 1px;
+  height: 18px;
+  background: var(--border);
+  margin: 0 6px;
+}
+.spacer {
+  flex: 1;
+}
+
+.file {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  margin-left: 6px;
+  padding: 0 4px;
+}
+.file-name {
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 240px;
+}
+.file-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.file-status::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--ok);
+}
+.file-status.dirty::before {
+  background: var(--warn);
+}
+.file-status.idle::before {
+  background: var(--subtle);
+}
+.file-status.warn {
+  color: var(--error);
+  font-weight: 500;
+}
+.file-status.warn::before {
+  background: var(--error);
+}
+
+.notice {
+  max-width: 420px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+  font-size: 12px;
+  margin-right: 8px;
+}
+.autosave {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-right: 4px;
+  font-size: 12px;
+  color: var(--muted);
+  cursor: pointer;
+  user-select: none;
+}
+.autosave input {
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+/* --- Panes -------------------------------------------------------------------- */
+
+.panes {
+  flex: 1;
+  display: grid;
+  min-height: 0;
+}
+.pane {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.pane-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  height: 34px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel-2);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  flex-shrink: 0;
+}
+.divider {
+  cursor: col-resize;
+  background: var(--border);
+  position: relative;
+}
+.divider::after {
+  content: "";
+  position: absolute;
+  inset: 0 -3px;
+}
+.divider:hover {
+  background: var(--accent);
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  font-weight: 500;
+  text-transform: none;
+  letter-spacing: 0;
+  padding: 1px 8px;
+  border-radius: 999px;
+  color: var(--muted);
+  background: var(--hover);
+}
+.chip.ok {
+  color: var(--ok);
+  background: color-mix(in srgb, var(--ok) 12%, transparent);
+}
+.chip.error {
+  color: var(--error);
+  background: color-mix(in srgb, var(--error) 12%, transparent);
+  cursor: help;
+}
+
+/* --- Code editor -------------------------------------------------------------- */
+
+.code-pane {
+  background: var(--panel);
+}
+.editor {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+.editor .cm-editor {
+  height: 100%;
+  background: var(--panel);
+  color: var(--fg);
+}
+.editor .cm-editor.cm-focused {
+  outline: none;
+}
+.editor .cm-scroller {
+  font:
+    13px/1.65 ui-monospace,
+    "SF Mono",
+    "JetBrains Mono",
+    Menlo,
+    monospace;
+}
+.editor .cm-content {
+  padding: 10px 0;
+}
+.editor .cm-gutters {
+  background: var(--panel);
+  border-right: none;
+  color: var(--subtle);
+}
+.editor .cm-lineNumbers .cm-gutterElement {
+  padding: 0 12px 0 14px;
+}
+.editor .cm-activeLine {
+  background: color-mix(in srgb, var(--accent) 5%, transparent);
+}
+.editor .cm-activeLineGutter {
+  background: transparent;
+  color: var(--fg);
+}
+.editor .cm-cursor {
+  border-left-color: var(--accent);
+  border-left-width: 2px;
+}
+.editor .cm-selectionBackground,
+.editor .cm-focused .cm-selectionBackground {
+  background: color-mix(in srgb, var(--accent) 22%, transparent) !important;
+}
+.error-bar {
+  display: flex;
+  gap: 8px;
+  padding: 8px 12px;
+  color: var(--error);
+  background: var(--error-soft);
+  border-top: 1px solid color-mix(in srgb, var(--error) 25%, transparent);
+  font-size: 12px;
+}
+.error-bar strong {
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+/* --- Canvas ------------------------------------------------------------------- */
+
+.canvas {
+  flex: 1;
+  min-height: 0;
+  transition: opacity 0.15s;
+}
+.canvas .react-flow {
+  background: var(--bg);
+  --xy-background-pattern-color: var(--grid);
+}
+.canvas.readonly {
+  opacity: 0.5;
+  filter: grayscale(0.5);
+}
+.readonly-badge,
+.hint {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  pointer-events: none;
+  font-size: 12px;
+  padding: 5px 12px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+.readonly-badge {
+  top: 46px;
+  color: var(--error);
+  background: var(--panel);
+  border: 1px solid color-mix(in srgb, var(--error) 35%, transparent);
+  box-shadow: var(--shadow-md);
+  font-weight: 500;
+}
+.hint {
+  bottom: 14px;
+  color: var(--muted);
+  background: color-mix(in srgb, var(--panel) 85%, transparent);
+  border: 1px solid var(--border);
+  backdrop-filter: blur(4px);
+}
+.hint kbd {
+  font: inherit;
+  font-weight: 500;
+  color: var(--fg);
+}
+
+.react-flow__controls {
+  box-shadow: var(--shadow-md);
+  border-radius: var(--radius);
+  overflow: hidden;
+  border: 1px solid var(--border);
+}
+.react-flow__controls button {
+  background: var(--panel);
+  color: var(--fg);
+  border-bottom: 1px solid var(--border);
+  fill: var(--muted);
+  width: 28px;
+  height: 28px;
+}
+.react-flow__controls button:last-child {
+  border-bottom: none;
+}
+.react-flow__controls button:hover {
+  background: var(--hover);
+  fill: var(--fg);
+}
+
+.node {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  font-size: 13px;
+}
+.node .shape {
+  position: absolute;
+  inset: 0;
+  overflow: visible;
+}
+.node .shape > * {
+  fill: var(--node-fill);
+  stroke: var(--node-stroke);
+  stroke-width: 1.25;
+  filter: drop-shadow(0 1px 1.5px rgb(0 0 0 / 0.06));
+}
+.node:hover .shape > * {
+  stroke: var(--fg);
+}
+.node.selected .shape > * {
+  stroke: var(--accent);
+  stroke-width: 2;
+  fill: color-mix(in srgb, var(--accent) 5%, var(--node-fill));
+}
+.node-label {
+  position: relative;
+  padding: 0 10px;
+  white-space: pre-line;
+  pointer-events: none;
+}
+.node .react-flow__handle {
+  width: 8px;
+  height: 8px;
+  background: var(--panel);
+  border: 1.5px solid var(--accent);
+  opacity: 0;
+  transition: opacity 0.1s;
+}
+.node:hover .react-flow__handle,
+.react-flow__node.selected .react-flow__handle {
+  opacity: 1;
+}
+.node .react-flow__handle:hover {
+  background: var(--accent);
+}
+
+.label-input {
+  position: relative;
+  width: calc(100% - 16px);
+  min-width: 80px;
+  font: inherit;
+  text-align: center;
+  padding: 3px 6px;
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  background: var(--panel);
+  color: var(--fg);
+  outline: none;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 20%, transparent);
+}
+.label-input.edge {
+  width: 120px;
+}
+
+.edge-label {
+  position: absolute;
+  pointer-events: all;
+  cursor: default;
+  font-size: 12px;
+  padding: 1px 7px;
+  border-radius: 4px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  color: var(--fg);
+  white-space: pre-line;
+}
+.edge-label.selected {
+  color: var(--accent);
+  border-color: var(--accent);
+}
