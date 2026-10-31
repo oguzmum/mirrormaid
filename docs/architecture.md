@@ -4,6 +4,7 @@
 | --- | --------------------------- | ------------- | ----------------------------------------- |
 | 1   | [Modules](#1-modules)       | Flowchart     | What parts exist and who depends on whom? |
 | 2   | [Data model](#2-data-model) | Class diagram | What does the parser produce?             |
+| 3   | [Files](#3-files)           | Flowchart     | Where does the diagram live?              |
 
 ## 1. Modules
 
@@ -16,6 +17,7 @@ flowchart TB
         Editor["CodeEditor.tsx<br/>CodeMirror 6"]
         Canvas["Canvas.tsx<br/>React Flow"]
         FileIO["fileIO.ts<br/>File System Access API"]
+        FileStore["fileStore.ts<br/>remembers open file (IndexedDB)"]
         Check["useMermaidCheck.ts<br/>lazy mermaid.parse"]
     end
 
@@ -36,6 +38,7 @@ flowchart TB
     App --> Editor
     App --> Canvas
     App --> FileIO
+    App --> FileStore
     App --> Check
     App --> Parser
     App --> Patches
@@ -160,4 +163,26 @@ Two views of the same text:
 - **Source structure** (`Statement`, `NodeRef`, `Link`) mirrors the code exactly as written, including chains (`A --> B --> C`) and groups (`A & B --> C`). Patches work on this.
 - **Model** (`FlowNode`, `FlowEdge`) is what the canvas draws. A node written three times in the code is one `FlowNode` with three `refs`. The last ref with a shape wins, like in Mermaid.
 
-`Layout` is not part of the parse result. It lives next to the code and is joined with it only on save (section 4).
+`Layout` is not part of the parse result. It lives next to the code and is joined with it only when the file is written (section 3).
+
+## 3. Files
+
+The diagram lives in a normal `.mmd` file on disk. The browser only keeps helpers.
+
+```mermaid
+flowchart LR
+    File[("flow.mmd on disk<br/>code + layout block")]
+    App["Mirrormaid<br/>code | layout"]
+    IDB[("IndexedDB<br/>which file is open")]
+    LS[("localStorage<br/>draft for crash recovery")]
+
+    File -->|"open: splitFile()"| App
+    App -->|"save / auto-save: joinFile()"| File
+    App -.-> IDB
+    App -.-> LS
+```
+
+- **New diagram:** lives in memory until the first save, which asks for a location.
+- **Linked file:** every change is written automatically (auto-save) or with ⌘S. Opening alone never writes.
+- **External edits** (VS Code, AI): picked up when the tab gets focus again. If Mirrormaid has unsaved edits at that moment, it asks instead of overwriting.
+- Needs Chrome or Edge (File System Access API). Other browsers can only download.
