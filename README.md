@@ -27,9 +27,9 @@ So I want a tool where I can edit a diagram visually AND as Mermaid code, and bo
 
 ## Roadmap
 
-1. **MVP: flowchart only.** Nodes and edges, rename/add/delete in both views, positions saved. One diagram per file.
+1. **MVP: flowchart only.** Nodes and edges, rename/add/delete in both views, positions saved. One diagram per file. ✅
 2. Export PNG / SVG
-3. More diagram types, one at a time: class → ER → state → sequence → mindmap. Free positioning may not make sense for every type (e.g. sequence diagrams are ordered by their code, mindmaps are laid out automatically).
+3. More diagram types, one at a time: class ✅ → ER → state → sequence → mindmap. Free positioning may not make sense for every type (e.g. sequence diagrams are ordered by their code, mindmaps are laid out automatically).
 4. Multiple sheets per file, each sheet holding one diagram. This changes the file format, so it needs its own ADR.
 5. PDF export
 
@@ -41,6 +41,7 @@ I'm also using this project to learn software architecture. Every important deci
 | --------------------------------------- | ------------------------------------------------ |
 | [0001](docs/adr/001-source-of-truth.md) | Source of truth: Mermaid text vs. internal model |
 | [0002](docs/adr/002-node-positions.md)  | Where node positions live                        |
+| [0003](docs/adr/003-edge-routes.md)     | Manually drawn edge routes                       |
 
 Open questions that will get their own ADR:
 

@@ -16,14 +16,18 @@ flowchart TB
         App["App.tsx<br/>state: code, layout, file"]
         Editor["CodeEditor.tsx<br/>CodeMirror 6"]
         Canvas["Canvas.tsx<br/>React Flow"]
+        ClassNode["ClassNode.tsx<br/>UML class box, relation markers"]
         FileIO["fileIO.ts<br/>File System Access API"]
         FileStore["fileStore.ts<br/>remembers open file (IndexedDB)"]
         Check["useMermaidCheck.ts<br/>lazy mermaid.parse"]
     end
 
     subgraph Core["core/ (pure TypeScript, tested)"]
+        Diagram["diagram.ts<br/>picks the parser by header"]
         Parser["flowchart.ts<br/>span-aware parser"]
         Patches["patches.ts<br/>UI action → text changes"]
+        ClassParser["classDiagram.ts<br/>span-aware parser"]
+        ClassPatches["classPatches.ts<br/>UI action → text changes"]
         Block["layoutBlock.ts<br/>split / join layout block"]
         Auto["autoLayout.ts<br/>place missing nodes"]
     end
@@ -40,13 +44,19 @@ flowchart TB
     App --> FileIO
     App --> FileStore
     App --> Check
-    App --> Parser
+    App --> Diagram
     App --> Patches
+    App --> ClassPatches
     App --> Block
     App --> Auto
 
+    Diagram --> Parser
+    Diagram --> ClassParser
     Patches --> Parser
-    Auto --> Parser
+    ClassPatches --> ClassParser
+    ClassPatches --> Patches
+    Auto --> Diagram
+    Canvas --> ClassNode
     Auto --> Dagre
     Canvas --> Auto
     Editor --> CM

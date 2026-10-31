@@ -1,6 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ReactFlowProvider } from "@xyflow/react";
-import { parseFlowchart, type Flowchart, type Shape } from "./core/flowchart";
+import type { Shape } from "./core/flowchart";
+import type { RelationType } from "./core/classDiagram";
+import {
+  TEMPLATES,
+  parseDiagram,
+  type Diagram,
+  type DiagramKind,
+} from "./core/diagram";
 import {
   joinFile,
   routeKeys,
@@ -19,9 +26,21 @@ import {
   setEdgeLabel,
   type Change,
 } from "./core/patches";
+import {
+  addClass,
+  addMember,
+  addRelation,
+  deleteClassElements,
+  editMember,
+  nextClassId,
+  renameClass,
+  setAnnotation,
+  setRelationLabel,
+  setRelationType,
+} from "./core/classPatches";
 import { autoLayoutAll, placeMissing } from "./core/autoLayout";
 import { CodeEditor, type CodeEditorHandle } from "./ui/CodeEditor";
-import { Canvas } from "./ui/Canvas";
+import { Canvas, ContextMenu } from "./ui/Canvas";
 import {
   WriteNotAllowedError,
   canWriteFiles,
@@ -44,7 +63,6 @@ const SAMPLE = `flowchart LR
     B -->|no| D[Sketch more]
     D --> A
 `;
-const EMPTY = "flowchart LR\n    A[Start] --> B[End]\n";
 const DRAFT_KEY = "mirrormaid:draft";
 const AUTOSAVE_KEY = "mirrormaid:autosave";
 const AUTOSAVE_DELAY = 600;
@@ -78,7 +96,20 @@ function loadAutosave(): boolean {
   }
 }
 
-const idsOf = (fc: Flowchart) =>
+/** Moves positions and routes along when a node ID is renamed. */
+function renameInRoutes(routes: Routes, from: string, to: string): Routes {
+  const out: Routes = {};
+  for (const [key, pts] of Object.entries(routes)) {
+    const m = /^(.+?)->(.+?)(#\d+)?$/.exec(key);
+    const next = m
+      ? `${m[1] === from ? to : m[1]}->${m[2] === from ? to : m[2]}${m[3] ?? ""}`
+      : key;
+    out[next] = pts;
+  }
+  return out;
+}
+
+const idsOf = (fc: Diagram) =>
   fc.ok
     ? { nodes: fc.nodes.map((n) => n.id), routes: routeKeys(fc).values() }
     : undefined;
@@ -112,11 +143,13 @@ export function App() {
   const [fitSignal, setFitSignal] = useState(0);
   const [split, setSplit] = useState(38);
   const [notice, setNotice] = useState<string>();
+  /** Where the "New" menu is open, if it is. */
+  const [newMenu, setNewMenu] = useState<{ x: number; y: number }>();
   const lastModified = useRef<number>(undefined);
 
-  const fc = useMemo(() => parseFlowchart(code), [code]);
+  const fc = useMemo(() => parseDiagram(code), [code]);
   // While the code is invalid the canvas shows the last valid diagram, read-only.
-  const lastGood = useRef<Flowchart>(fc);
+  const lastGood = useRef<Diagram>(fc);
   if (fc.ok) lastGood.current = fc;
   const shown = fc.ok ? fc : lastGood.current;
 
@@ -170,23 +203,62 @@ export function App() {
   const patch = (changes: Change[]) => editor.current?.apply(changes);
 
   const onAddNode = (pos: Pos) => {
-    const id = nextNodeId(fc);
+    const id = fc.kind === "class" ? nextClassId(fc) : nextNodeId(fc);
     setLayout((l) => ({ ...l, [id]: pos }));
     setAutoEditId(id);
-    patch(addNode(code, fc, id, "New node"));
+    patch(
+      fc.kind === "class"
+        ? addClass(code, fc, id)
+        : addNode(code, fc, id, "New node"),
+    );
   };
-  const onRename = (id: string, label: string) =>
-    patch(renameNode(fc, id, label));
+  const onRename = (id: string, label: string) => {
+    if (fc.kind === "flowchart") return patch(renameNode(fc, id, label));
+    const r = renameClass(fc, id, label);
+    if (r.error) return setNotice(r.error);
+    const newId = r.newId;
+    if (newId) {
+      // The id is the key for positions and routes, so they move along.
+      setLayout(({ [id]: pos, ...rest }) =>
+        pos ? { ...rest, [newId]: pos } : rest,
+      );
+      setRoutes((rs) => renameInRoutes(rs, id, newId));
+    }
+    patch(r.changes);
+  };
   const onChangeShape = (id: string, shape: Shape) =>
-    patch(changeNodeShape(code, fc, id, shape));
+    fc.kind === "flowchart" && patch(changeNodeShape(code, fc, id, shape));
   const onEdgeLabel = (edgeId: string, label: string) => {
+    if (fc.kind === "class") {
+      const rel = fc.edges.find((e) => e.id === edgeId);
+      if (rel) patch(setRelationLabel(code, rel, label));
+      return;
+    }
     const edge = fc.edges.find((e) => e.id === edgeId);
     if (edge) patch(setEdgeLabel(fc, edge, label));
   };
   const onConnect = (from: string, to: string) =>
-    patch(addEdge(code, fc, from, to));
+    patch(
+      fc.kind === "class"
+        ? addRelation(code, fc, from, to)
+        : addEdge(code, fc, from, to),
+    );
   const onDelete = (nodeIds: string[], edgeIds: string[]) =>
-    patch(deleteElements(code, fc, nodeIds, edgeIds));
+    patch(
+      fc.kind === "class"
+        ? deleteClassElements(code, fc, nodeIds, edgeIds)
+        : deleteElements(code, fc, nodeIds, edgeIds),
+    );
+  const onMember = (id: string, index: number, text: string | null) =>
+    fc.kind === "class" && patch(editMember(code, fc, id, index, text));
+  const onAddMember = (id: string, text: string) =>
+    fc.kind === "class" && patch(addMember(code, fc, id, text));
+  const onAnnotation = (id: string, annotation: string | undefined) =>
+    fc.kind === "class" && patch(setAnnotation(code, fc, id, annotation));
+  const onRelationType = (edgeId: string, type: RelationType) => {
+    const rel = fc.kind === "class" && fc.edges.find((e) => e.id === edgeId);
+    if (rel) patch(setRelationType(rel, type));
+  };
   const onMove = (moved: Layout) => {
     // Routes between two nodes that moved together move along with them.
     const keys = routeKeys(fc);
@@ -438,9 +510,10 @@ export function App() {
     loadText(await f.text(), f.name, handle, f.lastModified, false);
   };
 
-  const doNew = () => {
+  const doNew = (kind: DiagramKind) => {
+    setNewMenu(undefined);
     if (!confirmDiscard()) return;
-    loadText(EMPTY, "untitled.mmd", undefined);
+    loadText(TEMPLATES[kind], "untitled.mmd", undefined);
     setSavedText(null);
     void rememberHandle(undefined);
   };
@@ -546,7 +619,41 @@ export function App() {
           </svg>
           Mirrormaid
         </span>
-        <button onClick={doNew}>New</button>
+        <button
+          aria-haspopup="menu"
+          aria-expanded={!!newMenu}
+          onClick={(e) => {
+            const r = e.currentTarget.getBoundingClientRect();
+            setNewMenu((m) => (m ? undefined : { x: r.left, y: r.bottom + 4 }));
+          }}
+        >
+          New
+        </button>
+        {newMenu && (
+          <ContextMenu
+            x={newMenu.x}
+            y={newMenu.y}
+            title="New diagram"
+            onClose={() => setNewMenu(undefined)}
+          >
+            <button
+              role="menuitem"
+              className="context-menu-item"
+              onClick={() => doNew("flowchart")}
+            >
+              <span className="context-menu-name">Flowchart</span>
+              <code>flowchart</code>
+            </button>
+            <button
+              role="menuitem"
+              className="context-menu-item"
+              onClick={() => doNew("class")}
+            >
+              <span className="context-menu-name">Class diagram</span>
+              <code>classDiagram</code>
+            </button>
+          </ContextMenu>
+        )}
         <button onClick={doOpen} title="Open (⌘O)">
           Open
         </button>
@@ -690,6 +797,10 @@ export function App() {
               onMove={onMove}
               onRename={onRename}
               onChangeShape={onChangeShape}
+              onMember={onMember}
+              onAddMember={onAddMember}
+              onAnnotation={onAnnotation}
+              onRelationType={onRelationType}
               onRoute={onRoute}
               onEdgeLabel={onEdgeLabel}
               onConnect={onConnect}
@@ -703,12 +814,20 @@ export function App() {
               Fix the code to edit the diagram
             </div>
           )}
-          {fc.ok && (
+          {fc.ok && fc.kind === "flowchart" && (
             <div className="hint">
               <kbd>Double-click</kbd> canvas to add · <kbd>Double-click</kbd> to
               rename · <kbd>Right-click</kbd> to change type · <kbd>Drag</kbd>{" "}
               handle to connect · <kbd>Drag</kbd> edge to bend · <kbd>⌫</kbd>{" "}
               delete
+            </div>
+          )}
+          {fc.ok && fc.kind === "class" && (
+            <div className="hint">
+              <kbd>Double-click</kbd> canvas to add a class ·{" "}
+              <kbd>Double-click</kbd> name or member to edit ·{" "}
+              <kbd>Right-click</kbd> for annotation / relation type ·{" "}
+              <kbd>Drag</kbd> handle to relate · <kbd>⌫</kbd> delete
             </div>
           )}
         </section>

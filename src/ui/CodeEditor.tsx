@@ -13,38 +13,75 @@ import { tags as t } from "@lezer/highlight";
 import type { Change } from "../core/patches";
 import type { ParseError } from "../core/flowchart";
 
-/** Small highlighter for flowchart syntax. Display only, the real parser lives in core/. */
-const mermaidLang = StreamLanguage.define<{ header: boolean }>({
-  startState: () => ({ header: false }),
-  token(stream) {
+/** Small highlighter for flowcharts and class diagrams. Display only, the real parsers live in core/. */
+const mermaidLang = StreamLanguage.define<{ kind?: "flowchart" | "class" }>({
+  startState: () => ({}),
+  copyState: (s) => ({ ...s }),
+  token(stream, state) {
     if (stream.sol() && stream.match(/^\s*%%.*/)) return "comment";
     if (stream.eatSpace()) return null;
-    if (stream.match(/^(flowchart|graph)\b/)) return "keyword";
-    if (stream.match(/^(TB|TD|BT|LR|RL)\b/)) return "keyword";
-    if (
-      stream.match(
-        /^(subgraph|end|classDef|class|style|linkStyle|click|direction)\b/,
-      )
-    )
-      return "keyword";
-    if (stream.match(/^<?(-{2,}|={2,}|-\.+-|~{3,})[>xo]?/)) return "operator";
-    if (stream.match(/^\|[^|]*\|/)) return "string";
-    if (stream.match(/^"[^"]*"/)) return "string";
-    if (
-      stream.match(/^(\(\(\(|\(\[|\[\[|\[\(|\(\(|\{\{|\[\/|\[\\|\(|\[|\{|>)/)
-    ) {
-      // label text up to the closing bracket
-      stream.match(/^[^\])}]*/);
-      return "string";
+    if (!state.kind) {
+      if (stream.match(/^classDiagram(-v2)?\b/)) {
+        state.kind = "class";
+        return "keyword";
+      }
+      if (stream.match(/^(flowchart|graph)\b/)) {
+        state.kind = "flowchart";
+        return "keyword";
+      }
     }
-    if (stream.match(/^[\])}\\/]+/)) return "string";
-    if (stream.match(/^:::[\w-]+/)) return "meta";
-    if (stream.match(/^&|;/)) return "operator";
-    if (stream.match(/^[\p{L}\p{N}_-]+/u)) return "variableName";
-    stream.next();
-    return null;
+    return state.kind === "class" ? classToken(stream) : flowToken(stream);
   },
 });
+
+type Stream = Parameters<
+  Parameters<typeof StreamLanguage.define>[0]["token"]
+>[0];
+
+function classToken(stream: Stream): string | null {
+  if (
+    stream.match(
+      /^(class|direction|namespace|note|for|classDef|cssClass|style|click|link|callback)\b/,
+    )
+  )
+    return "keyword";
+  if (stream.match(/^(TB|TD|BT|LR|RL)\b/)) return "keyword";
+  if (stream.match(/^<<[^>]*>>/)) return "meta";
+  if (stream.match(/^(<\||\*|<|o(?=--|\.\.))?(--|\.\.)(\|>|>|\*|o(?=[\s"]))?/))
+    return "operator";
+  if (stream.match(/^"[^"]*"/)) return "string";
+  if (stream.match(/^:.*/)) return "string";
+  if (stream.match(/^~[^~\s]*~/)) return "meta";
+  if (stream.match(/^[{}]/)) return "operator";
+  if (stream.match(/^[+\-#~](?=\S)/)) return "operator";
+  if (stream.match(/^[\p{L}\p{N}_]+/u)) return "variableName";
+  stream.next();
+  return null;
+}
+
+function flowToken(stream: Stream): string | null {
+  if (stream.match(/^(TB|TD|BT|LR|RL)\b/)) return "keyword";
+  if (
+    stream.match(
+      /^(subgraph|end|classDef|class|style|linkStyle|click|direction)\b/,
+    )
+  )
+    return "keyword";
+  if (stream.match(/^<?(-{2,}|={2,}|-\.+-|~{3,})[>xo]?/)) return "operator";
+  if (stream.match(/^\|[^|]*\|/)) return "string";
+  if (stream.match(/^"[^"]*"/)) return "string";
+  if (stream.match(/^(\(\(\(|\(\[|\[\[|\[\(|\(\(|\{\{|\[\/|\[\\|\(|\[|\{|>)/)) {
+    // label text up to the closing bracket
+    stream.match(/^[^\])}]*/);
+    return "string";
+  }
+  if (stream.match(/^[\])}\\/]+/)) return "string";
+  if (stream.match(/^:::[\w-]+/)) return "meta";
+  if (stream.match(/^&|;/)) return "operator";
+  if (stream.match(/^[\p{L}\p{N}_-]+/u)) return "variableName";
+  stream.next();
+  return null;
+}
 
 const highlight = HighlightStyle.define([
   { tag: t.comment, color: "var(--muted)", fontStyle: "italic" },

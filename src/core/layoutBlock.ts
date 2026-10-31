@@ -17,7 +17,7 @@
  * sees the block and UI patches can't touch it.
  */
 
-import type { Flowchart } from "./flowchart";
+import type { Graph } from "./diagram";
 
 export interface Pos {
   x: number;
@@ -34,7 +34,7 @@ export type Routes = Record<string, Pos[]>;
  * between the same two nodes, counted in source order. Unlike edge IDs these
  * survive reordering statements and edits elsewhere in the code.
  */
-export function routeKeys(fc: Flowchart): Map<string, string> {
+export function routeKeys(fc: Pick<Graph, "edges">): Map<string, string> {
   const seen = new Map<string, number>();
   const out = new Map<string, string>();
   for (const e of fc.edges) {

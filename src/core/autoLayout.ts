@@ -10,7 +10,9 @@
  */
 
 import dagre from "@dagrejs/dagre";
-import type { FlowNode, Flowchart } from "./flowchart";
+import type { FlowNode } from "./flowchart";
+import { displayMember, type ClassNode } from "./classDiagram";
+import type { Diagram } from "./diagram";
 import type { Layout, Pos } from "./layoutBlock";
 
 export interface Size {
@@ -38,7 +40,45 @@ export function nodeSize(node: Pick<FlowNode, "label" | "shape">): Size {
   }
 }
 
-function dagreLayout(fc: Flowchart): Layout {
+/** Box metrics of a UML class, shared with the canvas so sizes match exactly. */
+export const CLASS_BOX = {
+  header: 32,
+  annotation: 14,
+  row: 20,
+  /** Vertical padding of a compartment; an empty one is just this high. */
+  pad: 6,
+  charW: 7.3,
+  nameCharW: 8.2,
+  minW: 120,
+} as const;
+
+export function classNodeSize(
+  node: Pick<ClassNode, "label" | "annotation" | "members">,
+): Size {
+  const B = CLASS_BOX;
+  const texts = node.members.map((m) => displayMember(m.text).text);
+  const w = Math.max(
+    B.minW,
+    Math.round(node.label.length * B.nameCharW + 32),
+    ...texts.map((t) => Math.round(t.length * B.charW + 24)),
+  );
+  const attrs = node.members.filter((m) => m.kind === "attribute").length;
+  const methods = node.members.length - attrs;
+  const h =
+    B.header +
+    (node.annotation ? B.annotation : 0) +
+    2 * B.pad +
+    (attrs + methods) * B.row +
+    2 * B.pad;
+  return { w, h };
+}
+
+/** Size of any diagram node. */
+export function sizeOf(node: FlowNode | ClassNode): Size {
+  return "members" in node ? classNodeSize(node) : nodeSize(node);
+}
+
+function dagreLayout(fc: Diagram): Layout {
   const g = new dagre.graphlib.Graph({ multigraph: true });
   g.setGraph({
     rankdir: fc.direction,
@@ -49,7 +89,7 @@ function dagreLayout(fc: Flowchart): Layout {
   });
   g.setDefaultEdgeLabel(() => ({}));
   for (const n of fc.nodes) {
-    const s = nodeSize(n);
+    const s = sizeOf(n);
     g.setNode(n.id, { width: s.w, height: s.h });
   }
   for (const e of fc.edges) g.setEdge(e.from, e.to, {}, e.id);
@@ -58,25 +98,25 @@ function dagreLayout(fc: Flowchart): Layout {
   const out: Layout = {};
   for (const n of fc.nodes) {
     const d = g.node(n.id);
-    const s = nodeSize(n);
+    const s = sizeOf(n);
     out[n.id] = { x: Math.round(d.x - s.w / 2), y: Math.round(d.y - s.h / 2) };
   }
   return out;
 }
 
-export function autoLayoutAll(fc: Flowchart): Layout {
+export function autoLayoutAll(fc: Diagram): Layout {
   return fc.nodes.length ? dagreLayout(fc) : {};
 }
 
 /** Returns positions for the nodes that don't have one yet (empty if none are missing). */
-export function placeMissing(fc: Flowchart, layout: Layout): Layout {
+export function placeMissing(fc: Diagram, layout: Layout): Layout {
   const missing = fc.nodes.filter((n) => !layout[n.id]);
   if (missing.length === 0) return {};
   const placedCount = fc.nodes.length - missing.length;
   const ideal = dagreLayout(fc);
   if (placedCount === 0) return ideal;
 
-  const sizes = new Map(fc.nodes.map((n) => [n.id, nodeSize(n)]));
+  const sizes = new Map<string, Size>(fc.nodes.map((n) => [n.id, sizeOf(n)]));
   const rects: { pos: Pos; size: Size }[] = fc.nodes
     .filter((n) => layout[n.id])
     .map((n) => ({ pos: layout[n.id], size: sizes.get(n.id)! }));

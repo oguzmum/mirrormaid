@@ -69,7 +69,7 @@ function statementIndent(text: string, fc: Flowchart): string {
   return lineIndent(text, last.span.from);
 }
 
-function lineIndent(text: string, at: number): string {
+export function lineIndent(text: string, at: number): string {
   const lineStart = text.lastIndexOf("\n", at - 1) + 1;
   return /^[ \t]*/.exec(text.slice(lineStart))![0];
 }
@@ -288,7 +288,7 @@ export function deleteElements(
 }
 
 /** Line deletions next to each other can overlap by one newline; merge them. */
-function mergeOverlaps(changes: Change[]): Change[] {
+export function mergeOverlaps(changes: Change[]): Change[] {
   const sorted = [...changes].sort((a, b) => a.from - b.from);
   const out: Change[] = [];
   for (const c of sorted) {
@@ -360,7 +360,7 @@ function replaceStatement(
   };
 }
 
-function deleteLine(text: string, from: number, to: number): Change {
+export function deleteLine(text: string, from: number, to: number): Change {
   const lineStart = text.lastIndexOf("\n", from - 1) + 1;
   const nl = text.indexOf("\n", to);
   if (nl !== -1) return { from: lineStart, to: nl + 1, insert: "" };

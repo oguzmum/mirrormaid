@@ -386,6 +386,7 @@ input {
   padding: 5px 12px;
   border-radius: 999px;
   white-space: nowrap;
+  max-width: calc(100% - 32px);
 }
 .readonly-badge {
   top: 46px;
@@ -397,6 +398,11 @@ input {
 }
 .hint {
   bottom: 14px;
+  white-space: normal;
+  width: max-content;
+  text-align: center;
+  line-height: 1.6;
+  border-radius: 12px;
   color: var(--muted);
   background: color-mix(in srgb, var(--panel) 85%, transparent);
   border: 1px solid var(--border);
@@ -619,4 +625,140 @@ input {
   color: var(--subtle);
   background: none;
   cursor: default;
+}
+
+/* --- UML class boxes -------------------------------------------------------- */
+.uml {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  background: var(--node-fill);
+  border: 1.25px solid var(--node-stroke);
+  border-radius: 4px;
+  font-size: 12px;
+  box-shadow: 0 1px 1.5px rgb(0 0 0 / 0.06);
+}
+.uml:hover {
+  border-color: var(--fg);
+}
+.uml.selected {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+  background: color-mix(in srgb, var(--accent) 5%, var(--node-fill));
+}
+.uml-head {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 0 10px;
+  text-align: center;
+}
+.uml-head .label-input {
+  width: calc(100% - 4px);
+}
+.uml-annotation {
+  font-size: 11px;
+  line-height: 14px;
+  color: var(--muted);
+}
+.uml-name {
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.uml-name.abstract,
+.uml-row.abstract {
+  font-style: italic;
+}
+.uml-section {
+  border-top: 1px solid var(--node-stroke);
+}
+.uml-row {
+  display: flex;
+  align-items: center;
+  padding: 0 10px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.uml-row:hover {
+  background: var(--hover);
+}
+.uml-row.static {
+  text-decoration: underline;
+}
+.uml-row .label-input {
+  text-align: left;
+  padding: 1px 4px;
+  width: 100%;
+  min-width: 0;
+  font-family: inherit;
+  font-size: inherit;
+}
+.uml-add {
+  position: absolute;
+  right: -9px;
+  bottom: -9px;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border-radius: 50%;
+  border: 1px solid var(--accent);
+  background: var(--panel);
+  color: var(--accent);
+  font-size: 13px;
+  line-height: 15px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.1s;
+}
+.uml:hover .uml-add,
+.react-flow__node.selected .uml-add {
+  opacity: 1;
+}
+.uml-add:hover {
+  background: var(--accent);
+  color: var(--accent-fg);
+}
+.uml .react-flow__handle {
+  width: 8px;
+  height: 8px;
+  background: var(--panel);
+  border: 1.5px solid var(--accent);
+  opacity: 0;
+  transition: opacity 0.1s;
+}
+.uml:hover .react-flow__handle,
+.react-flow__node.selected .uml .react-flow__handle {
+  opacity: 1;
+}
+
+/* --- Relations -------------------------------------------------------------- */
+.marker-defs {
+  position: absolute;
+  width: 0;
+  height: 0;
+  overflow: hidden;
+}
+.edge-card {
+  position: absolute;
+  pointer-events: none;
+  font-size: 11px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.relation-icon {
+  flex: none;
+  overflow: visible;
+}
+.relation-icon line {
+  stroke: currentColor;
+  stroke-width: 1.3;
+}
+.context-menu-sep {
+  height: 1px;
+  margin: 4px 2px;
+  background: var(--border);
 }

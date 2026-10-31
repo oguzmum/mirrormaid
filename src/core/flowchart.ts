@@ -95,6 +95,7 @@ export interface ParseError {
 }
 
 export interface Flowchart {
+  kind: "flowchart";
   ok: boolean;
   direction: Direction;
   headerSpan?: Span;
@@ -168,6 +169,7 @@ export function unquote(raw: string): string {
 
 export function parseFlowchart(text: string): Flowchart {
   const result: Flowchart = {
+    kind: "flowchart",
     ok: false,
     direction: "TB",
     nodes: [],
@@ -200,7 +202,7 @@ export function parseFlowchart(text: string): Flowchart {
       } else {
         result.errors.push({
           message:
-            "Expected `flowchart` or `graph` header (only flowcharts are supported yet)",
+            "Expected a `flowchart`, `graph` or `classDiagram` header (other diagram types are not supported yet)",
           from: lineFrom,
           to: lineTo,
         });

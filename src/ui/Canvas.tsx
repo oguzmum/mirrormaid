@@ -1,11 +1,4 @@
-import {
-  createContext,
-  memo,
-  useContext,
-  useEffect,
-  useRef,
-  useState,
-} from "react";
+import { memo, useContext, useEffect, useRef, useState } from "react";
 import {
   BaseEdge,
   Background,
@@ -15,7 +8,6 @@ import {
   EdgeLabelRenderer,
   Handle,
   MarkerType,
-  Position,
   ReactFlow,
   applyEdgeChanges,
   applyNodeChanges,
@@ -28,23 +20,34 @@ import {
   type Node,
   type NodeProps,
 } from "@xyflow/react";
-import {
-  SHAPE_DELIMS,
-  type Direction,
-  type Flowchart,
-  type Link,
-  type Shape,
-} from "../core/flowchart";
+import { SHAPE_DELIMS, type Shape } from "../core/flowchart";
+import { relationType, type RelationType } from "../core/classDiagram";
+import type { Diagram } from "../core/diagram";
 import {
   routeKeys,
   type Layout,
   type Pos,
   type Routes,
 } from "../core/layoutBlock";
-import { nodeSize } from "../core/autoLayout";
+import { classNodeSize, nodeSize, sizeOf } from "../core/autoLayout";
+import {
+  AnnotationItems,
+  ClassNodeView,
+  RelationItems,
+  UmlMarkerDefs,
+  classData,
+  markerId,
+} from "./ClassNode";
+import {
+  CanvasCtx,
+  HANDLES,
+  LabelInput,
+  displayLabel,
+  type Ctx,
+} from "./canvasShared";
 
 export interface CanvasProps {
-  fc: Flowchart;
+  fc: Diagram;
   layout: Layout;
   routes: Routes;
   readOnly: boolean;
@@ -55,6 +58,10 @@ export interface CanvasProps {
   onMove(positions: Layout): void;
   onRename(id: string, label: string): void;
   onChangeShape(id: string, shape: Shape): void;
+  onMember(id: string, index: number, text: string | null): void;
+  onAddMember(id: string, text: string): void;
+  onAnnotation(id: string, annotation: string | undefined): void;
+  onRelationType(edgeId: string, type: RelationType): void;
   /** Sets an edge's waypoints; an empty list resets it to the automatic curve. */
   onRoute(edgeId: string, points: Pos[]): void;
   onEdgeLabel(edgeId: string, label: string): void;
@@ -65,39 +72,22 @@ export interface CanvasProps {
 }
 
 type ShapeData = { label: string; shape: Shape; w: number; h: number };
-type EdgeData = { label?: string; link: Link; points?: Pos[] };
-
-interface Ctx {
-  direction: Direction;
-  readOnly: boolean;
-  autoEditId?: string;
-  editingEdge?: string;
-  setEditingEdge(id?: string): void;
-  onRename(id: string, label: string): void;
-  onEdgeLabel(edgeId: string, label: string): void;
-  onRoute(edgeId: string, points: Pos[]): void;
-  toFlow(clientX: number, clientY: number): Pos;
-  onAutoEditDone(): void;
-}
-const CanvasCtx = createContext<Ctx>(null!);
-
-const HANDLES: Record<Direction, [Position, Position]> = {
-  LR: [Position.Left, Position.Right],
-  RL: [Position.Right, Position.Left],
-  TB: [Position.Top, Position.Bottom],
-  BT: [Position.Bottom, Position.Top],
+type EdgeData = {
+  label?: string;
+  lineStyle: "solid" | "dotted" | "thick" | "invisible";
+  points?: Pos[];
+  /** Cardinalities at the source and target end (class diagrams). */
+  fromCard?: string;
+  toCard?: string;
 };
-
-function displayLabel(label: string) {
-  return label.replace(/<br\s*\/?>/gi, "\n");
-}
 
 export function Canvas(props: CanvasProps) {
   const { fc, layout, routes, readOnly } = props;
   const rf = useReactFlow();
-  const [nodes, setNodes] = useState<Node<ShapeData>[]>([]);
+  const [nodes, setNodes] = useState<Node[]>([]);
   const [edges, setEdges] = useState<Edge<EdgeData>[]>([]);
   const [editingEdge, setEditingEdge] = useState<string>();
+  const connectFrom = useRef<string>(undefined);
   const [menu, setMenu] = useState<{
     kind: "node" | "edge";
     id: string;
@@ -109,49 +99,69 @@ export function Canvas(props: CanvasProps) {
   useEffect(() => {
     setNodes((prev) => {
       const selected = new Set(prev.filter((n) => n.selected).map((n) => n.id));
-      return fc.nodes.map((n) => {
-        const size = nodeSize(n);
-        return {
+      return fc.nodes.map((n): Node => {
+        const size = sizeOf(n);
+        const common = {
           id: n.id,
-          type: "shape",
           position: layout[n.id] ?? { x: 0, y: 0 },
-          data: { label: n.label, shape: n.shape, w: size.w, h: size.h },
           selected: selected.has(n.id),
         };
+        return "members" in n
+          ? { ...common, type: "class", data: classData(n, size.w, size.h) }
+          : {
+              ...common,
+              type: "shape",
+              data: { label: n.label, shape: n.shape, w: size.w, h: size.h },
+            };
       });
     });
     setEdges((prev) => {
       const selected = new Set(prev.filter((e) => e.selected).map((e) => e.id));
       const keys = routeKeys(fc);
-      return fc.edges.map((e) => {
+      const arrow = {
+        type: MarkerType.ArrowClosed,
+        width: 16,
+        height: 16,
+        color: "var(--edge)",
+      };
+      if (fc.kind === "class") {
+        return fc.edges.map((r): Edge<EdgeData> => ({
+          id: r.id,
+          source: r.from,
+          target: r.to,
+          type: "label",
+          data: {
+            label: r.label,
+            lineStyle: r.dashed ? "dotted" : "solid",
+            points: routes[keys.get(r.id)!],
+            fromCard: r.fromCard,
+            toCard: r.toCard,
+          },
+          selected: selected.has(r.id),
+          markerStart: r.fromMarker && markerId(r.fromMarker),
+          markerEnd: r.toMarker && markerId(r.toMarker),
+        }));
+      }
+      return fc.edges.map((e): Edge<EdgeData> => {
         const link = fc.statements[e.statement].links[e.link];
-        const marker =
-          link.head === "none"
-            ? undefined
-            : link.head === "arrow"
-              ? MarkerType.ArrowClosed
-              : MarkerType.Arrow;
         return {
           id: e.id,
           source: e.from,
           target: e.to,
           type: "label",
-          data: { label: link.label, link, points: routes[keys.get(e.id)!] },
-          selected: selected.has(e.id),
-          markerEnd: marker && {
-            type: marker,
-            width: 16,
-            height: 16,
-            color: "var(--edge)",
+          data: {
+            label: link.label,
+            lineStyle: link.style,
+            points: routes[keys.get(e.id)!],
           },
-          markerStart: link.tailArrow
-            ? {
-                type: MarkerType.ArrowClosed,
-                width: 16,
-                height: 16,
-                color: "var(--edge)",
-              }
-            : undefined,
+          selected: selected.has(e.id),
+          markerEnd:
+            link.head === "none"
+              ? undefined
+              : link.head === "arrow"
+                ? arrow
+                : { ...arrow, type: MarkerType.Arrow },
+          markerStart: link.tailArrow ? arrow : undefined,
         };
       });
     });
@@ -174,6 +184,8 @@ export function Canvas(props: CanvasProps) {
     editingEdge,
     setEditingEdge,
     onRename: props.onRename,
+    onMember: props.onMember,
+    onAddMember: props.onAddMember,
     onEdgeLabel: props.onEdgeLabel,
     onRoute: props.onRoute,
     toFlow: (x, y) => rf.screenToFlowPosition({ x, y }),
@@ -191,7 +203,10 @@ export function Canvas(props: CanvasProps) {
           )
             return;
           const p = rf.screenToFlowPosition({ x: e.clientX, y: e.clientY });
-          const s = nodeSize({ label: "New node", shape: "rect" });
+          const s =
+            fc.kind === "class"
+              ? classNodeSize({ label: "NewClass", members: [] })
+              : nodeSize({ label: "New node", shape: "rect" });
           props.onAddNode({
             x: Math.round(p.x - s.w / 2),
             y: Math.round(p.y - s.h / 2),
@@ -214,9 +229,17 @@ export function Canvas(props: CanvasProps) {
               };
             props.onMove(moved);
           }}
-          onConnect={(c) =>
-            c.source && c.target && props.onConnect(c.source, c.target)
+          onConnectStart={(_, p) =>
+            (connectFrom.current = p.nodeId ?? undefined)
           }
+          onConnect={(c) => {
+            if (!c.source || !c.target) return;
+            // Starting at a target handle makes React Flow swap the ends; the
+            // node the user dragged from is meant to be the source.
+            if (c.target === connectFrom.current && c.source !== c.target)
+              props.onConnect(c.target, c.source);
+            else props.onConnect(c.source, c.target);
+          }}
           onDelete={({ nodes: ns, edges: es }) =>
             props.onDelete(
               ns.map((n) => n.id),
@@ -250,7 +273,8 @@ export function Canvas(props: CanvasProps) {
           <Background variant={BackgroundVariant.Dots} gap={18} size={1.2} />
           <Controls showInteractive={false} />
         </ReactFlow>
-        {menu?.kind === "node" && (
+        {fc.kind === "class" && <UmlMarkerDefs />}
+        {menu?.kind === "node" && fc.kind === "flowchart" && (
           <ContextMenu
             x={menu.x}
             y={menu.y}
@@ -266,13 +290,44 @@ export function Canvas(props: CanvasProps) {
             />
           </ContextMenu>
         )}
+        {menu?.kind === "node" && fc.kind === "class" && (
+          <ContextMenu
+            x={menu.x}
+            y={menu.y}
+            title="Annotation"
+            onClose={() => setMenu(undefined)}
+          >
+            <AnnotationItems
+              current={fc.nodes.find((n) => n.id === menu.id)?.annotation}
+              onPick={(a) => {
+                setMenu(undefined);
+                props.onAnnotation(menu.id, a);
+              }}
+            />
+          </ContextMenu>
+        )}
         {menu?.kind === "edge" && (
           <ContextMenu
             x={menu.x}
             y={menu.y}
-            title="Edge"
+            title={fc.kind === "class" ? "Relation" : "Edge"}
             onClose={() => setMenu(undefined)}
           >
+            {fc.kind === "class" && (
+              <>
+                <RelationItems
+                  current={(() => {
+                    const r = fc.edges.find((e) => e.id === menu.id);
+                    return r && relationType(r);
+                  })()}
+                  onPick={(type) => {
+                    setMenu(undefined);
+                    props.onRelationType(menu.id, type);
+                  }}
+                />
+                <div className="context-menu-sep" />
+              </>
+            )}
             <button
               role="menuitem"
               className="context-menu-item"
@@ -310,7 +365,7 @@ const SHAPE_OPTIONS: { shape: Shape; name: string }[] = [
   { shape: "trapezoid-alt", name: "Trapezoid (alt)" },
 ];
 
-function ContextMenu(props: {
+export function ContextMenu(props: {
   x: number;
   y: number;
   title: string;
@@ -388,52 +443,6 @@ function ShapeItems(props: { current?: Shape; onPick(shape: Shape): void }) {
 }
 
 type Node_ = globalThis.Node;
-
-// --- Inline label editor -------------------------------------------------------
-
-function LabelInput(props: {
-  value: string;
-  onDone(value: string | null): void;
-  className?: string;
-}) {
-  const [value, setValue] = useState(props.value);
-  const ref = useRef<HTMLInputElement>(null);
-  const done = useRef(false);
-  useEffect(() => {
-    // New nodes are hidden until React Flow has measured them, and hidden inputs
-    // can't take focus, so retry for a few frames.
-    let tries = 0;
-    let raf = 0;
-    const focus = () => {
-      const el = ref.current;
-      if (!el) return;
-      el.focus();
-      if (document.activeElement === el) el.select();
-      else if (tries++ < 10) raf = requestAnimationFrame(focus);
-    };
-    focus();
-    return () => cancelAnimationFrame(raf);
-  }, []);
-  const finish = (v: string | null) => {
-    if (done.current) return;
-    done.current = true;
-    props.onDone(v);
-  };
-  return (
-    <input
-      ref={ref}
-      className={`label-input nodrag nopan ${props.className ?? ""}`}
-      value={value}
-      onChange={(e) => setValue(e.target.value)}
-      onKeyDown={(e) => {
-        e.stopPropagation();
-        if (e.key === "Enter") finish(value);
-        if (e.key === "Escape") finish(null);
-      }}
-      onBlur={() => finish(value)}
-    />
-  );
-}
 
 // --- Nodes ---------------------------------------------------------------------
 
@@ -633,6 +642,33 @@ function snapTo(p: Pos, neighbours: Pos[], dist = 8): Pos {
   return { x: Math.round(x), y: Math.round(y) };
 }
 
+let measurer: SVGPathElement | undefined;
+
+/**
+ * Where to put a cardinality: a bit along the path from one end, shifted to
+ * the side so it doesn't sit on the line or the marker.
+ */
+function cardinalityPos(path: string, atEnd: boolean): Pos {
+  if (!measurer) {
+    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    svg.setAttribute("style", "position:absolute;width:0;height:0");
+    measurer = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    svg.appendChild(measurer);
+    document.body.appendChild(svg);
+  }
+  measurer.setAttribute("d", path);
+  const len = measurer.getTotalLength();
+  const d = Math.min(24, len / 3);
+  const at = atEnd ? len - d : d;
+  const p = measurer.getPointAtLength(at);
+  const q = measurer.getPointAtLength(atEnd ? at - 1 : at + 1);
+  const tx = q.x - p.x;
+  const ty = q.y - p.y;
+  const n = Math.hypot(tx, ty) || 1;
+  // Normal on the left side of the travel direction.
+  return { x: p.x + (ty / n) * 12, y: p.y - (tx / n) * 12 };
+}
+
 /** Center of a node, or the fallback while it isn't measured yet. */
 function centerOf(node: InternalNode | undefined, fallback: Pos): Pos {
   const w = node?.measured.width;
@@ -672,7 +708,7 @@ function borderPoint(
 
 const LabelEdge = memo(function LabelEdge(p: EdgeProps<Edge<EdgeData>>) {
   const ctx = useContext(CanvasCtx);
-  const link = p.data!.link;
+  const lineStyle = p.data!.lineStyle;
   const editing = ctx.editingEdge === p.id;
   /** Live waypoints while dragging; committed on pointer up. */
   const [draft, setDraft] = useState<Pos[] | null>(null);
@@ -758,18 +794,30 @@ const LabelEdge = memo(function LabelEdge(p: EdgeProps<Edge<EdgeData>>) {
 
   const style: React.CSSProperties = {
     stroke: "var(--edge)",
-    strokeWidth: link.style === "thick" ? 3 : 1.5,
+    strokeWidth: lineStyle === "thick" ? 3 : 1.5,
     strokeDasharray:
-      link.style === "dotted"
+      lineStyle === "dotted"
         ? "4 4"
-        : link.style === "invisible"
+        : lineStyle === "invisible"
           ? "2 6"
           : undefined,
-    opacity: link.style === "invisible" ? 0.35 : 1,
+    opacity: lineStyle === "invisible" ? 0.35 : 1,
   };
   if (p.selected) style.stroke = "var(--accent)";
 
   const showHandles = p.selected && canEdit && !editing;
+  const cards = (
+    [
+      [p.data!.fromCard, false],
+      [p.data!.toCard, true],
+    ] as const
+  )
+    .filter(([text]) => text)
+    .map(([text, atEnd]) => ({
+      text: text!,
+      atEnd,
+      pos: cardinalityPos(path, atEnd),
+    }));
   // Spots that add a bend when dragged: segment middles, or the curve's middle
   // (unless the label sits there; the line itself can be grabbed, too).
   const midpoints = points.length
@@ -792,8 +840,19 @@ const LabelEdge = memo(function LabelEdge(p: EdgeProps<Edge<EdgeData>>) {
       {canEdit && (
         <path d={path} className="edge-grab nopan" onPointerDown={grabLine} />
       )}
-      {(p.data!.label || editing || showHandles) && (
+      {(p.data!.label || editing || showHandles || cards.length > 0) && (
         <EdgeLabelRenderer>
+          {cards.map((c) => (
+            <div
+              key={c.atEnd ? "to" : "from"}
+              className="edge-card"
+              style={{
+                transform: `translate(-50%, -50%) translate(${c.pos.x}px, ${c.pos.y}px)`,
+              }}
+            >
+              {c.text}
+            </div>
+          ))}
           {(p.data!.label || editing) && (
             <div
               className={`edge-label nodrag nopan${p.selected ? " selected" : ""}`}
@@ -851,5 +910,5 @@ const LabelEdge = memo(function LabelEdge(p: EdgeProps<Edge<EdgeData>>) {
   );
 });
 
-const nodeTypes = { shape: ShapeNode };
+const nodeTypes = { shape: ShapeNode, class: ClassNodeView };
 const edgeTypes = { label: LabelEdge };
