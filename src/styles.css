@@ -580,3 +580,43 @@ input {
   stroke: currentColor;
   stroke-width: 1.25;
 }
+
+/* --- Edge routing ----------------------------------------------------------- */
+.edge-grab {
+  fill: none;
+  stroke: transparent;
+  stroke-width: 14;
+  pointer-events: stroke;
+  cursor: move;
+}
+.edge-handle {
+  position: absolute;
+  left: -5px;
+  top: -5px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 2px solid var(--panel);
+  box-shadow: var(--shadow);
+  pointer-events: all;
+  cursor: move;
+}
+.edge-handle.add {
+  left: -4px;
+  top: -4px;
+  width: 8px;
+  height: 8px;
+  background: var(--panel);
+  border: 1.5px solid var(--accent);
+  opacity: 0.8;
+  cursor: copy;
+}
+.edge-handle:hover {
+  outline: 3px solid color-mix(in srgb, var(--accent) 30%, transparent);
+}
+.context-menu-item:disabled {
+  color: var(--subtle);
+  background: none;
+  cursor: default;
+}

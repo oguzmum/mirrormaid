@@ -20,9 +20,11 @@ import {
   applyEdgeChanges,
   applyNodeChanges,
   getBezierPath,
+  useInternalNode,
   useReactFlow,
   type Edge,
   type EdgeProps,
+  type InternalNode,
   type Node,
   type NodeProps,
 } from "@xyflow/react";
@@ -33,12 +35,18 @@ import {
   type Link,
   type Shape,
 } from "../core/flowchart";
-import type { Layout, Pos } from "../core/layoutBlock";
+import {
+  routeKeys,
+  type Layout,
+  type Pos,
+  type Routes,
+} from "../core/layoutBlock";
 import { nodeSize } from "../core/autoLayout";
 
 export interface CanvasProps {
   fc: Flowchart;
   layout: Layout;
+  routes: Routes;
   readOnly: boolean;
   /** Node that should open its label editor as soon as it appears. */
   autoEditId?: string;
@@ -47,6 +55,8 @@ export interface CanvasProps {
   onMove(positions: Layout): void;
   onRename(id: string, label: string): void;
   onChangeShape(id: string, shape: Shape): void;
+  /** Sets an edge's waypoints; an empty list resets it to the automatic curve. */
+  onRoute(edgeId: string, points: Pos[]): void;
   onEdgeLabel(edgeId: string, label: string): void;
   onConnect(from: string, to: string): void;
   onAddNode(pos: Pos): void;
@@ -55,7 +65,7 @@ export interface CanvasProps {
 }
 
 type ShapeData = { label: string; shape: Shape; w: number; h: number };
-type EdgeData = { label?: string; link: Link };
+type EdgeData = { label?: string; link: Link; points?: Pos[] };
 
 interface Ctx {
   direction: Direction;
@@ -65,6 +75,8 @@ interface Ctx {
   setEditingEdge(id?: string): void;
   onRename(id: string, label: string): void;
   onEdgeLabel(edgeId: string, label: string): void;
+  onRoute(edgeId: string, points: Pos[]): void;
+  toFlow(clientX: number, clientY: number): Pos;
   onAutoEditDone(): void;
 }
 const CanvasCtx = createContext<Ctx>(null!);
@@ -81,12 +93,17 @@ function displayLabel(label: string) {
 }
 
 export function Canvas(props: CanvasProps) {
-  const { fc, layout, readOnly } = props;
+  const { fc, layout, routes, readOnly } = props;
   const rf = useReactFlow();
   const [nodes, setNodes] = useState<Node<ShapeData>[]>([]);
   const [edges, setEdges] = useState<Edge<EdgeData>[]>([]);
   const [editingEdge, setEditingEdge] = useState<string>();
-  const [menu, setMenu] = useState<{ id: string; x: number; y: number }>();
+  const [menu, setMenu] = useState<{
+    kind: "node" | "edge";
+    id: string;
+    x: number;
+    y: number;
+  }>();
 
   // Derive React Flow state from the parsed text + layout, keeping the selection.
   useEffect(() => {
@@ -105,6 +122,7 @@ export function Canvas(props: CanvasProps) {
     });
     setEdges((prev) => {
       const selected = new Set(prev.filter((e) => e.selected).map((e) => e.id));
+      const keys = routeKeys(fc);
       return fc.edges.map((e) => {
         const link = fc.statements[e.statement].links[e.link];
         const marker =
@@ -118,7 +136,7 @@ export function Canvas(props: CanvasProps) {
           source: e.from,
           target: e.to,
           type: "label",
-          data: { label: link.label, link },
+          data: { label: link.label, link, points: routes[keys.get(e.id)!] },
           selected: selected.has(e.id),
           markerEnd: marker && {
             type: marker,
@@ -137,7 +155,7 @@ export function Canvas(props: CanvasProps) {
         };
       });
     });
-  }, [fc, layout]);
+  }, [fc, layout, routes]);
 
   const firstFit = useRef(true);
   useEffect(() => {
@@ -157,6 +175,8 @@ export function Canvas(props: CanvasProps) {
     setEditingEdge,
     onRename: props.onRename,
     onEdgeLabel: props.onEdgeLabel,
+    onRoute: props.onRoute,
+    toFlow: (x, y) => rf.screenToFlowPosition({ x, y }),
     onAutoEditDone: props.onAutoEditDone,
   };
 
@@ -206,7 +226,12 @@ export function Canvas(props: CanvasProps) {
           onNodeContextMenu={(e, n) => {
             e.preventDefault();
             if (readOnly) return;
-            setMenu({ id: n.id, x: e.clientX, y: e.clientY });
+            setMenu({ kind: "node", id: n.id, x: e.clientX, y: e.clientY });
+          }}
+          onEdgeContextMenu={(e, edge) => {
+            e.preventDefault();
+            if (readOnly) return;
+            setMenu({ kind: "edge", id: edge.id, x: e.clientX, y: e.clientY });
           }}
           onPaneClick={() => setMenu(undefined)}
           onMoveStart={() => setMenu(undefined)}
@@ -225,17 +250,41 @@ export function Canvas(props: CanvasProps) {
           <Background variant={BackgroundVariant.Dots} gap={18} size={1.2} />
           <Controls showInteractive={false} />
         </ReactFlow>
-        {menu && (
-          <ShapeMenu
+        {menu?.kind === "node" && (
+          <ContextMenu
             x={menu.x}
             y={menu.y}
-            current={fc.nodes.find((n) => n.id === menu.id)?.shape}
-            onPick={(shape) => {
-              setMenu(undefined);
-              props.onChangeShape(menu.id, shape);
-            }}
+            title="Change type"
             onClose={() => setMenu(undefined)}
-          />
+          >
+            <ShapeItems
+              current={fc.nodes.find((n) => n.id === menu.id)?.shape}
+              onPick={(shape) => {
+                setMenu(undefined);
+                props.onChangeShape(menu.id, shape);
+              }}
+            />
+          </ContextMenu>
+        )}
+        {menu?.kind === "edge" && (
+          <ContextMenu
+            x={menu.x}
+            y={menu.y}
+            title="Edge"
+            onClose={() => setMenu(undefined)}
+          >
+            <button
+              role="menuitem"
+              className="context-menu-item"
+              disabled={!edges.find((e) => e.id === menu.id)?.data?.points}
+              onClick={() => {
+                setMenu(undefined);
+                props.onRoute(menu.id, []);
+              }}
+            >
+              <span className="context-menu-name">Reset route</span>
+            </button>
+          </ContextMenu>
         )}
       </div>
     </CanvasCtx.Provider>
@@ -261,12 +310,12 @@ const SHAPE_OPTIONS: { shape: Shape; name: string }[] = [
   { shape: "trapezoid-alt", name: "Trapezoid (alt)" },
 ];
 
-function ShapeMenu(props: {
+function ContextMenu(props: {
   x: number;
   y: number;
-  current?: Shape;
-  onPick(shape: Shape): void;
+  title: string;
   onClose(): void;
+  children: React.ReactNode;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState({ left: props.x, top: props.y });
@@ -305,7 +354,15 @@ function ShapeMenu(props: {
       role="menu"
       onContextMenu={(e) => e.preventDefault()}
     >
-      <div className="context-menu-title">Change type</div>
+      <div className="context-menu-title">{props.title}</div>
+      {props.children}
+    </div>
+  );
+}
+
+function ShapeItems(props: { current?: Shape; onPick(shape: Shape): void }) {
+  return (
+    <>
       {SHAPE_OPTIONS.map(({ shape, name }) => {
         const [open, close] = SHAPE_DELIMS[shape];
         return (
@@ -326,7 +383,7 @@ function ShapeMenu(props: {
           </button>
         );
       })}
-    </div>
+    </>
   );
 }
 
@@ -515,11 +572,190 @@ const ShapeNode = memo(function ShapeNode({
 
 // --- Edges ---------------------------------------------------------------------
 
+/** Polyline through the points with rounded corners. */
+function roundedPath(pts: Pos[], radius: number): string {
+  let d = `M${pts[0].x},${pts[0].y}`;
+  for (let i = 1; i < pts.length - 1; i++) {
+    const [p0, p1, p2] = [pts[i - 1], pts[i], pts[i + 1]];
+    const d1 = Math.hypot(p1.x - p0.x, p1.y - p0.y);
+    const d2 = Math.hypot(p2.x - p1.x, p2.y - p1.y);
+    const r = Math.min(radius, d1 / 2, d2 / 2);
+    if (r < 0.5) {
+      d += ` L${p1.x},${p1.y}`;
+      continue;
+    }
+    const ax = p1.x + ((p0.x - p1.x) * r) / d1;
+    const ay = p1.y + ((p0.y - p1.y) * r) / d1;
+    const bx = p1.x + ((p2.x - p1.x) * r) / d2;
+    const by = p1.y + ((p2.y - p1.y) * r) / d2;
+    d += ` L${ax},${ay} Q${p1.x},${p1.y} ${bx},${by}`;
+  }
+  const last = pts[pts.length - 1];
+  return d + ` L${last.x},${last.y}`;
+}
+
+/** The point halfway along the polyline, where the label goes. */
+function polylineMidpoint(pts: Pos[]): Pos {
+  const lens = pts
+    .slice(1)
+    .map((p, i) => Math.hypot(p.x - pts[i].x, p.y - pts[i].y));
+  let rest = lens.reduce((a, b) => a + b, 0) / 2;
+  for (let i = 0; i < lens.length; i++) {
+    if (rest <= lens[i] && lens[i] > 0) {
+      const t = rest / lens[i];
+      return {
+        x: pts[i].x + (pts[i + 1].x - pts[i].x) * t,
+        y: pts[i].y + (pts[i + 1].y - pts[i].y) * t,
+      };
+    }
+    rest -= lens[i];
+  }
+  return pts[0];
+}
+
+function distToSegment(p: Pos, a: Pos, b: Pos): number {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const len2 = dx * dx + dy * dy;
+  const t = len2
+    ? Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / len2))
+    : 0;
+  return Math.hypot(p.x - (a.x + t * dx), p.y - (a.y + t * dy));
+}
+
+/** Snaps x/y to a neighbouring point when close, so straight lines are easy. */
+function snapTo(p: Pos, neighbours: Pos[], dist = 8): Pos {
+  let { x, y } = p;
+  for (const n of neighbours) {
+    if (Math.abs(n.x - p.x) < dist) x = n.x;
+    if (Math.abs(n.y - p.y) < dist) y = n.y;
+  }
+  return { x: Math.round(x), y: Math.round(y) };
+}
+
+/** Center of a node, or the fallback while it isn't measured yet. */
+function centerOf(node: InternalNode | undefined, fallback: Pos): Pos {
+  const w = node?.measured.width;
+  const h = node?.measured.height;
+  if (!node || !w || !h) return fallback;
+  const { x, y } = node.internals.positionAbsolute;
+  return { x: x + w / 2, y: y + h / 2 };
+}
+
+/** Where the line from the node's center towards `toward` leaves its outline. */
+function borderPoint(
+  node: InternalNode | undefined,
+  toward: Pos,
+  fallback: Pos,
+): Pos {
+  const w = node?.measured.width;
+  const h = node?.measured.height;
+  if (!node || !w || !h) return fallback;
+  const c = centerOf(node, fallback);
+  const dx = toward.x - c.x;
+  const dy = toward.y - c.y;
+  if (!dx && !dy) return c;
+  const [rx, ry] = [w / 2, h / 2];
+  const shape = (node.data as ShapeData).shape;
+  let t: number;
+  if (shape === "diamond") t = 1 / (Math.abs(dx) / rx + Math.abs(dy) / ry);
+  else if (shape === "circle" || shape === "double-circle")
+    t = 1 / Math.hypot(dx / rx, dy / ry);
+  else
+    t = Math.min(
+      dx ? rx / Math.abs(dx) : Infinity,
+      dy ? ry / Math.abs(dy) : Infinity,
+    );
+  t = Math.min(t, 1);
+  return { x: c.x + dx * t, y: c.y + dy * t };
+}
+
 const LabelEdge = memo(function LabelEdge(p: EdgeProps<Edge<EdgeData>>) {
   const ctx = useContext(CanvasCtx);
-  const [path, lx, ly] = getBezierPath(p);
   const link = p.data!.link;
   const editing = ctx.editingEdge === p.id;
+  /** Live waypoints while dragging; committed on pointer up. */
+  const [draft, setDraft] = useState<Pos[] | null>(null);
+  const points = draft ?? p.data!.points ?? [];
+  const sourceNode = useInternalNode(p.source);
+  const targetNode = useInternalNode(p.target);
+  // Routed edges float: they leave the node's outline towards the first/last
+  // waypoint instead of the fixed handle, so they can go in any direction.
+  const src = points.length
+    ? borderPoint(sourceNode, points[0], { x: p.sourceX, y: p.sourceY })
+    : { x: p.sourceX, y: p.sourceY };
+  const tgt = points.length
+    ? borderPoint(targetNode, points[points.length - 1], {
+        x: p.targetX,
+        y: p.targetY,
+      })
+    : { x: p.targetX, y: p.targetY };
+  const all = [src, ...points, tgt];
+  // The first/last waypoint snaps to the node centers, so lines can be made straight.
+  const srcCenter = centerOf(sourceNode, src);
+  const tgtCenter = centerOf(targetNode, tgt);
+
+  let path: string;
+  let mid: Pos;
+  if (points.length) {
+    path = roundedPath(all, 10);
+    mid = polylineMidpoint(all);
+  } else {
+    const [d, lx, ly] = getBezierPath(p);
+    path = d;
+    mid = { x: lx, y: ly };
+  }
+
+  const canEdit = !ctx.readOnly;
+
+  /**
+   * Drags waypoint `index`. With `insert`, a new waypoint is created there
+   * first, but only kept if the pointer actually moves (a click just selects).
+   */
+  const startDrag = (e: React.PointerEvent, index: number, insert: boolean) => {
+    if (!canEdit || e.button !== 0) return;
+    e.stopPropagation();
+    const start = { x: e.clientX, y: e.clientY };
+    const base = [...points];
+    if (insert) base.splice(index, 0, ctx.toFlow(e.clientX, e.clientY));
+    let current = base;
+    let moved = false;
+    const move = (ev: PointerEvent) => {
+      if (!moved && Math.hypot(ev.clientX - start.x, ev.clientY - start.y) < 3)
+        return;
+      moved = true;
+      const full = [srcCenter, ...base, tgtCenter];
+      const pt = snapTo(ctx.toFlow(ev.clientX, ev.clientY), [
+        full[index],
+        full[index + 2],
+      ]);
+      current = base.map((q, i) => (i === index ? pt : q));
+      setDraft(current);
+    };
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      if (moved) ctx.onRoute(p.id, current);
+      setDraft(null);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  };
+
+  /** Grabbing the line itself bends it at the nearest segment. */
+  const grabLine = (e: React.PointerEvent) => {
+    const at = ctx.toFlow(e.clientX, e.clientY);
+    let seg = 0;
+    if (points.length) {
+      let best = Infinity;
+      for (let i = 0; i < all.length - 1; i++) {
+        const d = distToSegment(at, all[i], all[i + 1]);
+        if (d < best) [best, seg] = [d, i];
+      }
+    }
+    startDrag(e, seg, true);
+  };
+
   const style: React.CSSProperties = {
     stroke: "var(--edge)",
     strokeWidth: link.style === "thick" ? 3 : 1.5,
@@ -533,6 +769,18 @@ const LabelEdge = memo(function LabelEdge(p: EdgeProps<Edge<EdgeData>>) {
   };
   if (p.selected) style.stroke = "var(--accent)";
 
+  const showHandles = p.selected && canEdit && !editing;
+  // Spots that add a bend when dragged: segment middles, or the curve's middle
+  // (unless the label sits there; the line itself can be grabbed, too).
+  const midpoints = points.length
+    ? all.slice(1).map((q, i) => ({
+        x: (all[i].x + q.x) / 2,
+        y: (all[i].y + q.y) / 2,
+      }))
+    : p.data!.label
+      ? []
+      : [mid];
+
   return (
     <>
       <BaseEdge
@@ -541,29 +789,62 @@ const LabelEdge = memo(function LabelEdge(p: EdgeProps<Edge<EdgeData>>) {
         markerStart={p.markerStart}
         style={style}
       />
-      {(p.data!.label || editing) && (
+      {canEdit && (
+        <path d={path} className="edge-grab nopan" onPointerDown={grabLine} />
+      )}
+      {(p.data!.label || editing || showHandles) && (
         <EdgeLabelRenderer>
-          <div
-            className={`edge-label nodrag nopan${p.selected ? " selected" : ""}`}
-            style={{
-              transform: `translate(-50%, -50%) translate(${lx}px, ${ly}px)`,
-            }}
-            onDoubleClick={() => !ctx.readOnly && ctx.setEditingEdge(p.id)}
-          >
-            {editing ? (
-              <LabelInput
-                className="edge"
-                value={p.data!.label ?? ""}
-                onDone={(v) => {
-                  ctx.setEditingEdge(undefined);
-                  if (v !== null && v.trim() !== (p.data!.label ?? ""))
-                    ctx.onEdgeLabel(p.id, v);
+          {(p.data!.label || editing) && (
+            <div
+              className={`edge-label nodrag nopan${p.selected ? " selected" : ""}`}
+              style={{
+                transform: `translate(-50%, -50%) translate(${mid.x}px, ${mid.y}px)`,
+              }}
+              onDoubleClick={() => canEdit && ctx.setEditingEdge(p.id)}
+            >
+              {editing ? (
+                <LabelInput
+                  className="edge"
+                  value={p.data!.label ?? ""}
+                  onDone={(v) => {
+                    ctx.setEditingEdge(undefined);
+                    if (v !== null && v.trim() !== (p.data!.label ?? ""))
+                      ctx.onEdgeLabel(p.id, v);
+                  }}
+                />
+              ) : (
+                displayLabel(p.data!.label!)
+              )}
+            </div>
+          )}
+          {showHandles &&
+            points.map((q, i) => (
+              <div
+                key={`p${i}`}
+                className="edge-handle nodrag nopan"
+                title="Drag to move · double-click to remove"
+                style={{ transform: `translate(${q.x}px, ${q.y}px)` }}
+                onPointerDown={(e) => startDrag(e, i, false)}
+                onDoubleClick={(e) => {
+                  e.stopPropagation();
+                  ctx.onRoute(
+                    p.id,
+                    points.filter((_, j) => j !== i),
+                  );
                 }}
               />
-            ) : (
-              displayLabel(p.data!.label!)
-            )}
-          </div>
+            ))}
+          {showHandles &&
+            !draft &&
+            midpoints.map((q, i) => (
+              <div
+                key={`m${i}`}
+                className="edge-handle add nodrag nopan"
+                title="Drag to add a bend"
+                style={{ transform: `translate(${q.x}px, ${q.y}px)` }}
+                onPointerDown={(e) => startDrag(e, i, true)}
+              />
+            ))}
         </EdgeLabelRenderer>
       )}
     </>

@@ -1,7 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ReactFlowProvider } from "@xyflow/react";
 import { parseFlowchart, type Flowchart, type Shape } from "./core/flowchart";
-import { joinFile, splitFile, type Layout, type Pos } from "./core/layoutBlock";
+import {
+  joinFile,
+  routeKeys,
+  splitFile,
+  type Layout,
+  type Pos,
+  type Routes,
+} from "./core/layoutBlock";
 import {
   addEdge,
   addNode,
@@ -72,7 +79,9 @@ function loadAutosave(): boolean {
 }
 
 const idsOf = (fc: Flowchart) =>
-  fc.ok ? fc.nodes.map((n) => n.id) : undefined;
+  fc.ok
+    ? { nodes: fc.nodes.map((n) => n.id), routes: routeKeys(fc).values() }
+    : undefined;
 
 export function App() {
   const initial = useMemo(() => {
@@ -83,6 +92,7 @@ export function App() {
   const editor = useRef<CodeEditorHandle>(null);
   const [code, setCode] = useState(initial.code);
   const [layout, setLayout] = useState<Layout>(initial.layout);
+  const [routes, setRoutes] = useState<Routes>(initial.routes);
   const [fileName, setFileName] = useState(initial.draft.name);
   /** The file on disk this diagram is linked to. Undefined = new, unsaved diagram. */
   const [handle, setHandle] = useState<FileSystemFileHandle>();
@@ -118,8 +128,8 @@ export function App() {
   }, [fc, layout]);
 
   const fileText = useMemo(
-    () => joinFile(code, layout, idsOf(fc)),
-    [code, layout, fc],
+    () => joinFile(code, layout, idsOf(fc), routes),
+    [code, layout, routes, fc],
   );
   const dirty = savedText === null || (touched && fileText !== savedText);
   const mermaid = useMermaidCheck(fileText);
@@ -178,7 +188,35 @@ export function App() {
   const onDelete = (nodeIds: string[], edgeIds: string[]) =>
     patch(deleteElements(code, fc, nodeIds, edgeIds));
   const onMove = (moved: Layout) => {
+    // Routes between two nodes that moved together move along with them.
+    const keys = routeKeys(fc);
+    const shifted: Routes = {};
+    for (const e of fc.edges) {
+      const key = keys.get(e.id)!;
+      const pts = routes[key];
+      const a = moved[e.from];
+      const b = moved[e.to];
+      if (!pts || !a || !b || !layout[e.from]) continue;
+      const dx = a.x - layout[e.from].x;
+      const dy = a.y - layout[e.from].y;
+      const bdx = b.x - (layout[e.to]?.x ?? NaN);
+      const bdy = b.y - (layout[e.to]?.y ?? NaN);
+      if (dx !== bdx || dy !== bdy || (dx === 0 && dy === 0)) continue;
+      shifted[key] = pts.map((p) => ({ x: p.x + dx, y: p.y + dy }));
+    }
     setLayout((l) => ({ ...l, ...moved }));
+    if (Object.keys(shifted).length) setRoutes((r) => ({ ...r, ...shifted }));
+    setTouched(true);
+  };
+  const onRoute = (edgeId: string, points: Pos[]) => {
+    const key = routeKeys(fc).get(edgeId);
+    if (!key) return;
+    setRoutes((r) => {
+      const next = { ...r };
+      if (points.length) next[key] = points;
+      else delete next[key];
+      return next;
+    });
     setTouched(true);
   };
   const onCodeChange = (text: string) => {
@@ -197,6 +235,7 @@ export function App() {
     const parts = splitFile(text);
     editor.current?.reset(parts.code); // fires onCodeChange, so reset `touched` after
     setLayout(parts.layout);
+    setRoutes(parts.routes);
     setFileName(name);
     setHandle(h);
     setPendingHandle(undefined);
@@ -409,6 +448,7 @@ export function App() {
   const doAutoLayout = () => {
     if (!fc.ok) return;
     setLayout(autoLayoutAll(fc));
+    setRoutes({});
     setTouched(true);
     setFitSignal((s) => s + 1);
   };
@@ -643,12 +683,14 @@ export function App() {
             <Canvas
               fc={shown}
               layout={layout}
+              routes={routes}
               readOnly={!fc.ok}
               autoEditId={autoEditId}
               fitSignal={fitSignal}
               onMove={onMove}
               onRename={onRename}
               onChangeShape={onChangeShape}
+              onRoute={onRoute}
               onEdgeLabel={onEdgeLabel}
               onConnect={onConnect}
               onAddNode={onAddNode}
@@ -665,7 +707,8 @@ export function App() {
             <div className="hint">
               <kbd>Double-click</kbd> canvas to add · <kbd>Double-click</kbd> to
               rename · <kbd>Right-click</kbd> to change type · <kbd>Drag</kbd>{" "}
-              handle to connect · <kbd>⌫</kbd> delete
+              handle to connect · <kbd>Drag</kbd> edge to bend · <kbd>⌫</kbd>{" "}
+              delete
             </div>
           )}
         </section>

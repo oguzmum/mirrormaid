@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { parseFlowchart } from "./flowchart";
-import { joinFile, splitFile } from "./layoutBlock";
+import { joinFile, routeKeys, splitFile } from "./layoutBlock";
 import {
   addEdge,
   addNode,
@@ -95,10 +95,49 @@ describe("layout block", () => {
     const out = joinFile(
       "flowchart LR\n  B --> A\n",
       { B: { x: 1.4, y: 2.6 }, A: { x: 0, y: 0 }, Z: { x: 9, y: 9 } },
-      ["A", "B"],
+      { nodes: ["A", "B"], routes: [] },
     );
     expect(out).toContain("%% A 0 0\n%% B 1 3\n%% /mirrormaid");
     expect(out).not.toContain("Z");
+  });
+
+  it("stores edge routes after the nodes and prunes orphan routes", () => {
+    const out = joinFile(
+      "flowchart LR\n  A --> B\n",
+      { A: { x: 0, y: 0 }, B: { x: 200, y: 0 } },
+      { nodes: ["A", "B"], routes: ["A->B"] },
+      {
+        "A->B": [
+          { x: 100.4, y: -40 },
+          { x: 100, y: 60 },
+        ],
+        "B->A": [{ x: 1, y: 1 }],
+      },
+    );
+    expect(out).toContain(
+      "%% A 0 0\n%% B 200 0\n%% A->B 100 -40 100 60\n%% /mirrormaid",
+    );
+    expect(out).not.toContain("B->A");
+    const back = splitFile(out);
+    expect(back.layout).toEqual({ A: { x: 0, y: 0 }, B: { x: 200, y: 0 } });
+    expect(back.routes).toEqual({
+      "A->B": [
+        { x: 100, y: -40 },
+        { x: 100, y: 60 },
+      ],
+    });
+    expect(parseFlowchart(out).ok).toBe(true);
+  });
+
+  it("keys routes by endpoints, numbering parallel edges", () => {
+    const fc = parseFlowchart(
+      "flowchart LR\n  A --> B\n  B --> C\n  A -.-> B\n",
+    );
+    expect([...routeKeys(fc).values()]).toEqual(["A->B", "B->C", "A->B#2"]);
+    const { routes } = splitFile(
+      "flowchart LR\n%% mirrormaid:layout v1\n%% A->B#2 5 6\n%% /mirrormaid:layout\n",
+    );
+    expect(routes).toEqual({ "A->B#2": [{ x: 5, y: 6 }] });
   });
 
   it("ignores broken lines and keeps content after the block", () => {
