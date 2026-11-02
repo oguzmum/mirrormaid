@@ -13,8 +13,10 @@ import { tags as t } from "@lezer/highlight";
 import type { Change } from "../core/patches";
 import type { ParseError } from "../core/flowchart";
 
-/** Small highlighter for flowcharts and class diagrams. Display only, the real parsers live in core/. */
-const mermaidLang = StreamLanguage.define<{ kind?: "flowchart" | "class" }>({
+/** Small highlighter for flowcharts, class and state diagrams. Display only, the real parsers live in core/. */
+const mermaidLang = StreamLanguage.define<{
+  kind?: "flowchart" | "class" | "state";
+}>({
   startState: () => ({}),
   copyState: (s) => ({ ...s }),
   token(stream, state) {
@@ -25,12 +27,18 @@ const mermaidLang = StreamLanguage.define<{ kind?: "flowchart" | "class" }>({
         state.kind = "class";
         return "keyword";
       }
+      if (stream.match(/^stateDiagram(-v2)?\b/)) {
+        state.kind = "state";
+        return "keyword";
+      }
       if (stream.match(/^(flowchart|graph)\b/)) {
         state.kind = "flowchart";
         return "keyword";
       }
     }
-    return state.kind === "class" ? classToken(stream) : flowToken(stream);
+    if (state.kind === "class") return classToken(stream);
+    if (state.kind === "state") return stateToken(stream);
+    return flowToken(stream);
   },
 });
 
@@ -54,6 +62,26 @@ function classToken(stream: Stream): string | null {
   if (stream.match(/^~[^~\s]*~/)) return "meta";
   if (stream.match(/^[{}]/)) return "operator";
   if (stream.match(/^[+\-#~](?=\S)/)) return "operator";
+  if (stream.match(/^[\p{L}\p{N}_]+/u)) return "variableName";
+  stream.next();
+  return null;
+}
+
+function stateToken(stream: Stream): string | null {
+  if (
+    stream.match(
+      /^(state|as|direction|note|left|right|of|end|classDef|class|style|click|hide)\b/,
+    )
+  )
+    return "keyword";
+  if (stream.match(/^(TB|TD|BT|LR|RL)\b/)) return "keyword";
+  if (stream.match(/^\[\*\]/)) return "meta";
+  if (stream.match(/^<<[^>]*>>/)) return "meta";
+  if (stream.match(/^-->/)) return "operator";
+  if (stream.match(/^"[^"]*"/)) return "string";
+  if (stream.match(/^:::[\w-]+/)) return "meta";
+  if (stream.match(/^:.*/)) return "string";
+  if (stream.match(/^[{}]/)) return "operator";
   if (stream.match(/^[\p{L}\p{N}_]+/u)) return "variableName";
   stream.next();
   return null;

@@ -12,7 +12,9 @@
 import dagre from "@dagrejs/dagre";
 import type { FlowNode } from "./flowchart";
 import { displayMember, type ClassNode } from "./classDiagram";
+import type { StateNode } from "./stateDiagram";
 import type { Diagram } from "./diagram";
+import type { Direction } from "./flowchart";
 import type { Layout, Pos } from "./layoutBlock";
 
 export interface Size {
@@ -73,9 +75,41 @@ export function classNodeSize(
   return { w, h };
 }
 
+/**
+ * Size of a state node. Fork/join bars lie across the flow, so they depend on
+ * the direction.
+ */
+export function stateNodeSize(
+  node: Pick<StateNode, "kind" | "label">,
+  direction: Direction = "TB",
+): Size {
+  switch (node.kind) {
+    case "start":
+      return { w: 22, h: 22 };
+    case "end":
+      return { w: 26, h: 26 };
+    case "choice":
+      return { w: 36, h: 36 };
+    case "fork":
+    case "join":
+      return direction === "LR" || direction === "RL"
+        ? { w: 10, h: 80 }
+        : { w: 80, h: 10 };
+    default: {
+      const s = nodeSize({ label: node.label, shape: "round" });
+      return { w: Math.max(s.w, 90), h: Math.max(s.h, 40) };
+    }
+  }
+}
+
 /** Size of any diagram node. */
-export function sizeOf(node: FlowNode | ClassNode): Size {
-  return "members" in node ? classNodeSize(node) : nodeSize(node);
+export function sizeOf(
+  node: FlowNode | ClassNode | StateNode,
+  direction?: Direction,
+): Size {
+  if ("members" in node) return classNodeSize(node);
+  if ("descriptions" in node) return stateNodeSize(node, direction);
+  return nodeSize(node);
 }
 
 function dagreLayout(fc: Diagram): Layout {
@@ -89,7 +123,7 @@ function dagreLayout(fc: Diagram): Layout {
   });
   g.setDefaultEdgeLabel(() => ({}));
   for (const n of fc.nodes) {
-    const s = sizeOf(n);
+    const s = sizeOf(n, fc.direction);
     g.setNode(n.id, { width: s.w, height: s.h });
   }
   for (const e of fc.edges) g.setEdge(e.from, e.to, {}, e.id);
@@ -98,7 +132,7 @@ function dagreLayout(fc: Diagram): Layout {
   const out: Layout = {};
   for (const n of fc.nodes) {
     const d = g.node(n.id);
-    const s = sizeOf(n);
+    const s = sizeOf(n, fc.direction);
     out[n.id] = { x: Math.round(d.x - s.w / 2), y: Math.round(d.y - s.h / 2) };
   }
   return out;
@@ -116,7 +150,9 @@ export function placeMissing(fc: Diagram, layout: Layout): Layout {
   const ideal = dagreLayout(fc);
   if (placedCount === 0) return ideal;
 
-  const sizes = new Map<string, Size>(fc.nodes.map((n) => [n.id, sizeOf(n)]));
+  const sizes = new Map<string, Size>(
+    fc.nodes.map((n) => [n.id, sizeOf(n, fc.direction)]),
+  );
   const rects: { pos: Pos; size: Size }[] = fc.nodes
     .filter((n) => layout[n.id])
     .map((n) => ({ pos: layout[n.id], size: sizes.get(n.id)! }));

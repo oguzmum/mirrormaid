@@ -38,6 +38,17 @@ import {
   setRelationLabel,
   setRelationType,
 } from "./core/classPatches";
+import {
+  addState,
+  addTransition,
+  connectPseudo,
+  deleteStateElements,
+  nextStateId,
+  renameState,
+  setStateKind,
+  setTransitionLabel,
+} from "./core/statePatches";
+import type { StateKind } from "./core/stateDiagram";
 import { autoLayoutAll, placeMissing } from "./core/autoLayout";
 import { CodeEditor, type CodeEditorHandle } from "./ui/CodeEditor";
 import { Canvas, ContextMenu } from "./ui/Canvas";
@@ -203,18 +214,28 @@ export function App() {
   const patch = (changes: Change[]) => editor.current?.apply(changes);
 
   const onAddNode = (pos: Pos) => {
-    const id = fc.kind === "class" ? nextClassId(fc) : nextNodeId(fc);
+    const id =
+      fc.kind === "class"
+        ? nextClassId(fc)
+        : fc.kind === "state"
+          ? nextStateId(fc)
+          : nextNodeId(fc);
     setLayout((l) => ({ ...l, [id]: pos }));
     setAutoEditId(id);
     patch(
       fc.kind === "class"
         ? addClass(code, fc, id)
-        : addNode(code, fc, id, "New node"),
+        : fc.kind === "state"
+          ? addState(code, fc, id)
+          : addNode(code, fc, id, "New node"),
     );
   };
   const onRename = (id: string, label: string) => {
     if (fc.kind === "flowchart") return patch(renameNode(fc, id, label));
-    const r = renameClass(fc, id, label);
+    const r =
+      fc.kind === "state"
+        ? renameState(code, fc, id, label)
+        : renameClass(fc, id, label);
     if (r.error) return setNotice(r.error);
     const newId = r.newId;
     if (newId) {
@@ -234,21 +255,38 @@ export function App() {
       if (rel) patch(setRelationLabel(code, rel, label));
       return;
     }
+    if (fc.kind === "state") {
+      const t = fc.edges.find((e) => e.id === edgeId);
+      if (t) patch(setTransitionLabel(code, t, label));
+      return;
+    }
     const edge = fc.edges.find((e) => e.id === edgeId);
     if (edge) patch(setEdgeLabel(fc, edge, label));
   };
-  const onConnect = (from: string, to: string) =>
+  const onConnect = (from: string, to: string) => {
+    if (fc.kind === "state") {
+      const r = addTransition(code, fc, from, to);
+      if (r.error) return setNotice(r.error);
+      return patch(r.changes);
+    }
     patch(
       fc.kind === "class"
         ? addRelation(code, fc, from, to)
         : addEdge(code, fc, from, to),
     );
+  };
   const onDelete = (nodeIds: string[], edgeIds: string[]) =>
     patch(
       fc.kind === "class"
         ? deleteClassElements(code, fc, nodeIds, edgeIds)
-        : deleteElements(code, fc, nodeIds, edgeIds),
+        : fc.kind === "state"
+          ? deleteStateElements(code, fc, nodeIds, edgeIds)
+          : deleteElements(code, fc, nodeIds, edgeIds),
     );
+  const onStateKind = (id: string, kind: Exclude<StateKind, "start" | "end">) =>
+    fc.kind === "state" && patch(setStateKind(code, fc, id, kind));
+  const onConnectPseudo = (id: string, which: "start" | "end") =>
+    fc.kind === "state" && patch(connectPseudo(code, fc, id, which));
   const onMember = (id: string, index: number, text: string | null) =>
     fc.kind === "class" && patch(editMember(code, fc, id, index, text));
   const onAddMember = (id: string, text: string) =>
@@ -652,6 +690,14 @@ export function App() {
               <span className="context-menu-name">Class diagram</span>
               <code>classDiagram</code>
             </button>
+            <button
+              role="menuitem"
+              className="context-menu-item"
+              onClick={() => doNew("state")}
+            >
+              <span className="context-menu-name">State diagram</span>
+              <code>stateDiagram-v2</code>
+            </button>
           </ContextMenu>
         )}
         <button onClick={doOpen} title="Open (⌘O)">
@@ -801,6 +847,8 @@ export function App() {
               onAddMember={onAddMember}
               onAnnotation={onAnnotation}
               onRelationType={onRelationType}
+              onStateKind={onStateKind}
+              onConnectPseudo={onConnectPseudo}
               onRoute={onRoute}
               onEdgeLabel={onEdgeLabel}
               onConnect={onConnect}
@@ -828,6 +876,14 @@ export function App() {
               <kbd>Double-click</kbd> name or member to edit ·{" "}
               <kbd>Right-click</kbd> for annotation / relation type ·{" "}
               <kbd>Drag</kbd> handle to relate · <kbd>⌫</kbd> delete
+            </div>
+          )}
+          {fc.ok && fc.kind === "state" && (
+            <div className="hint">
+              <kbd>Double-click</kbd> canvas to add a state ·{" "}
+              <kbd>Double-click</kbd> to rename · <kbd>Right-click</kbd> for
+              type / start / end · <kbd>Drag</kbd> handle to connect ·{" "}
+              <kbd>⌫</kbd> delete
             </div>
           )}
         </section>

@@ -5,8 +5,9 @@
 
 import { parseFlowchart, type Flowchart } from "./flowchart";
 import { parseClassDiagram, type ClassDiagram } from "./classDiagram";
+import { parseStateDiagram, type StateDiagram } from "./stateDiagram";
 
-export type Diagram = Flowchart | ClassDiagram;
+export type Diagram = Flowchart | ClassDiagram | StateDiagram;
 export type DiagramKind = Diagram["kind"];
 
 /** What layout and routing need from any diagram: nodes and edges by ID. */
@@ -20,15 +21,22 @@ export function diagramKind(text: string): DiagramKind {
   for (const raw of text.split("\n")) {
     const line = raw.trim();
     if (line === "" || line.startsWith("%%")) continue;
-    return /^classDiagram\b/.test(line) ? "class" : "flowchart";
+    if (/^classDiagram\b/.test(line)) return "class";
+    if (/^stateDiagram\b/.test(line)) return "state";
+    return "flowchart";
   }
   return "flowchart";
 }
 
 export function parseDiagram(text: string): Diagram {
-  return diagramKind(text) === "class"
-    ? parseClassDiagram(text)
-    : parseFlowchart(text);
+  switch (diagramKind(text)) {
+    case "class":
+      return parseClassDiagram(text);
+    case "state":
+      return parseStateDiagram(text);
+    default:
+      return parseFlowchart(text);
+  }
 }
 
 export const TEMPLATES: Record<DiagramKind, string> = {
@@ -43,5 +51,11 @@ export const TEMPLATES: Record<DiagramKind, string> = {
         +fetch() void
     }
     Animal <|-- Dog
+`,
+  state: `stateDiagram-v2
+    [*] --> Idle
+    Idle --> Busy : start
+    Busy --> Idle : done
+    Busy --> [*]
 `,
 };

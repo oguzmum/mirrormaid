@@ -23,13 +23,20 @@ import {
 import { SHAPE_DELIMS, type Shape } from "../core/flowchart";
 import { relationType, type RelationType } from "../core/classDiagram";
 import type { Diagram } from "../core/diagram";
+import { isPseudo, type StateKind } from "../core/stateDiagram";
 import {
   routeKeys,
   type Layout,
   type Pos,
   type Routes,
 } from "../core/layoutBlock";
-import { classNodeSize, nodeSize, sizeOf } from "../core/autoLayout";
+import {
+  classNodeSize,
+  nodeSize,
+  sizeOf,
+  stateNodeSize,
+} from "../core/autoLayout";
+import { StateKindItems, StateNodeView, stateData } from "./StateNode";
 import {
   AnnotationItems,
   ClassNodeView,
@@ -62,6 +69,9 @@ export interface CanvasProps {
   onAddMember(id: string, text: string): void;
   onAnnotation(id: string, annotation: string | undefined): void;
   onRelationType(edgeId: string, type: RelationType): void;
+  onStateKind(id: string, kind: Exclude<StateKind, "start" | "end">): void;
+  /** Adds `[*] --> id` or `id --> [*]`. */
+  onConnectPseudo(id: string, which: "start" | "end"): void;
   /** Sets an edge's waypoints; an empty list resets it to the automatic curve. */
   onRoute(edgeId: string, points: Pos[]): void;
   onEdgeLabel(edgeId: string, label: string): void;
@@ -100,12 +110,18 @@ export function Canvas(props: CanvasProps) {
     setNodes((prev) => {
       const selected = new Set(prev.filter((n) => n.selected).map((n) => n.id));
       return fc.nodes.map((n): Node => {
-        const size = sizeOf(n);
+        const size = sizeOf(n, fc.direction);
         const common = {
           id: n.id,
           position: layout[n.id] ?? { x: 0, y: 0 },
           selected: selected.has(n.id),
         };
+        if ("descriptions" in n)
+          return {
+            ...common,
+            type: "state",
+            data: stateData(n, size.w, size.h),
+          };
         return "members" in n
           ? { ...common, type: "class", data: classData(n, size.w, size.h) }
           : {
@@ -140,6 +156,21 @@ export function Canvas(props: CanvasProps) {
           selected: selected.has(r.id),
           markerStart: r.fromMarker && markerId(r.fromMarker),
           markerEnd: r.toMarker && markerId(r.toMarker),
+        }));
+      }
+      if (fc.kind === "state") {
+        return fc.edges.map((t): Edge<EdgeData> => ({
+          id: t.id,
+          source: t.from,
+          target: t.to,
+          type: "label",
+          data: {
+            label: t.label,
+            lineStyle: "solid",
+            points: routes[keys.get(t.id)!],
+          },
+          selected: selected.has(t.id),
+          markerEnd: arrow,
         }));
       }
       return fc.edges.map((e): Edge<EdgeData> => {
@@ -206,7 +237,9 @@ export function Canvas(props: CanvasProps) {
           const s =
             fc.kind === "class"
               ? classNodeSize({ label: "NewClass", members: [] })
-              : nodeSize({ label: "New node", shape: "rect" });
+              : fc.kind === "state"
+                ? stateNodeSize({ kind: "state", label: "NewState" })
+                : nodeSize({ label: "New node", shape: "rect" });
           props.onAddNode({
             x: Math.round(p.x - s.w / 2),
             y: Math.round(p.y - s.h / 2),
@@ -306,11 +339,63 @@ export function Canvas(props: CanvasProps) {
             />
           </ContextMenu>
         )}
+        {menu?.kind === "node" &&
+          fc.kind === "state" &&
+          (() => {
+            const n = fc.nodes.find((n) => n.id === menu.id);
+            if (!n || isPseudo(n.kind)) return null;
+            const close = () => setMenu(undefined);
+            return (
+              <ContextMenu
+                x={menu.x}
+                y={menu.y}
+                title="State type"
+                onClose={close}
+              >
+                <StateKindItems
+                  current={n.kind}
+                  onPick={(kind) => {
+                    close();
+                    props.onStateKind(menu.id, kind);
+                  }}
+                />
+                <div className="context-menu-sep" />
+                <button
+                  role="menuitem"
+                  className="context-menu-item"
+                  onClick={() => {
+                    close();
+                    props.onConnectPseudo(menu.id, "start");
+                  }}
+                >
+                  <span className="context-menu-name">Connect from start</span>
+                  <code>[*] --&gt;</code>
+                </button>
+                <button
+                  role="menuitem"
+                  className="context-menu-item"
+                  onClick={() => {
+                    close();
+                    props.onConnectPseudo(menu.id, "end");
+                  }}
+                >
+                  <span className="context-menu-name">Connect to end</span>
+                  <code>--&gt; [*]</code>
+                </button>
+              </ContextMenu>
+            );
+          })()}
         {menu?.kind === "edge" && (
           <ContextMenu
             x={menu.x}
             y={menu.y}
-            title={fc.kind === "class" ? "Relation" : "Edge"}
+            title={
+              fc.kind === "class"
+                ? "Relation"
+                : fc.kind === "state"
+                  ? "Transition"
+                  : "Edge"
+            }
             onClose={() => setMenu(undefined)}
           >
             {fc.kind === "class" && (
@@ -910,5 +995,9 @@ const LabelEdge = memo(function LabelEdge(p: EdgeProps<Edge<EdgeData>>) {
   );
 });
 
-const nodeTypes = { shape: ShapeNode, class: ClassNodeView };
+const nodeTypes = {
+  shape: ShapeNode,
+  class: ClassNodeView,
+  state: StateNodeView,
+};
 const edgeTypes = { label: LabelEdge };

@@ -762,3 +762,75 @@ input {
   margin: 4px 2px;
   background: var(--border);
 }
+
+/* --- State diagrams --------------------------------------------------------- */
+.state-state {
+  background: var(--node-fill);
+  border: 1.25px solid var(--node-stroke);
+  border-radius: 12px;
+  box-shadow: 0 1px 1.5px rgb(0 0 0 / 0.06);
+}
+.state-state:hover {
+  border-color: var(--fg);
+}
+.state-state.selected {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+  background: color-mix(in srgb, var(--accent) 5%, var(--node-fill));
+}
+.state-start,
+.state-fork,
+.state-join {
+  background: var(--node-stroke);
+}
+.state-start {
+  border-radius: 50%;
+}
+.state-fork,
+.state-join {
+  border-radius: 2px;
+}
+.state-end {
+  border-radius: 50%;
+  border: 1.5px solid var(--node-stroke);
+  background: var(--node-fill);
+}
+.state-end-dot {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--node-stroke);
+}
+.state-start.selected,
+.state-fork.selected,
+.state-join.selected,
+.state-end.selected .state-end-dot {
+  background: var(--accent);
+}
+.state-end.selected {
+  border-color: var(--accent);
+}
+.state-icon {
+  display: inline-block;
+  width: 26px;
+  height: 14px;
+  flex: none;
+  box-sizing: border-box;
+}
+.state-icon-state {
+  border: 1.25px solid currentColor;
+  border-radius: 5px;
+}
+.state-icon-choice {
+  width: 14px;
+  margin: 0 6px;
+  border: 1.25px solid currentColor;
+  transform: scale(0.75) rotate(45deg);
+}
+.state-icon-fork,
+.state-icon-join {
+  height: 4px;
+  margin: 5px 0;
+  background: currentColor;
+  border-radius: 1px;
+}

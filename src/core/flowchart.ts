@@ -202,7 +202,7 @@ export function parseFlowchart(text: string): Flowchart {
       } else {
         result.errors.push({
           message:
-            "Expected a `flowchart`, `graph` or `classDiagram` header (other diagram types are not supported yet)",
+            "Expected a `flowchart`, `graph`, `classDiagram` or `stateDiagram-v2` header (other diagram types are not supported yet)",
           from: lineFrom,
           to: lineTo,
         });
