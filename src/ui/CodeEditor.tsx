@@ -13,13 +13,16 @@ import { tags as t } from "@lezer/highlight";
 import type { Change } from "../core/patches";
 import type { ParseError } from "../core/flowchart";
 
-/** Small highlighter for flowcharts, class and state diagrams. Display only, the real parsers live in core/. */
+/** Small highlighter for flowcharts, class, state diagrams and mindmaps. Display only, the real parsers live in core/. */
 const mermaidLang = StreamLanguage.define<{
-  kind?: "flowchart" | "class" | "state";
+  kind?: "flowchart" | "class" | "state" | "mindmap";
+  /** Mindmap: inside a node's brackets. */
+  inNode?: boolean;
 }>({
   startState: () => ({}),
   copyState: (s) => ({ ...s }),
   token(stream, state) {
+    if (stream.sol()) state.inNode = false;
     if (stream.sol() && stream.match(/^\s*%%.*/)) return "comment";
     if (stream.eatSpace()) return null;
     if (!state.kind) {
@@ -31,6 +34,10 @@ const mermaidLang = StreamLanguage.define<{
         state.kind = "state";
         return "keyword";
       }
+      if (stream.match(/^mindmap\b/)) {
+        state.kind = "mindmap";
+        return "keyword";
+      }
       if (stream.match(/^(flowchart|graph)\b/)) {
         state.kind = "flowchart";
         return "keyword";
@@ -38,6 +45,7 @@ const mermaidLang = StreamLanguage.define<{
     }
     if (state.kind === "class") return classToken(stream);
     if (state.kind === "state") return stateToken(stream);
+    if (state.kind === "mindmap") return mindmapToken(stream, state);
     return flowToken(stream);
   },
 });
@@ -83,6 +91,26 @@ function stateToken(stream: Stream): string | null {
   if (stream.match(/^:.*/)) return "string";
   if (stream.match(/^[{}]/)) return "operator";
   if (stream.match(/^[\p{L}\p{N}_]+/u)) return "variableName";
+  stream.next();
+  return null;
+}
+
+function mindmapToken(
+  stream: Stream,
+  state: { inNode?: boolean },
+): string | null {
+  if (state.inNode) {
+    if (stream.match(/^("[^"]*"|[^)\](}]+)/)) return "string";
+    state.inNode = false;
+    if (stream.match(/^(\)\)|\(\(|\}\}|\)|\]|\()/)) return "operator";
+  }
+  if (stream.match(/^::icon\([^)]*\)?/)) return "meta";
+  if (stream.match(/^:::.*/)) return "meta";
+  if (stream.match(/^(\)\)|\(\(|\{\{|\)|\(|\[)/)) {
+    state.inNode = true;
+    return "operator";
+  }
+  if (stream.match(/^[^([)\]{}]+/)) return "variableName";
   stream.next();
   return null;
 }

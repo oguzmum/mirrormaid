@@ -49,7 +49,18 @@ import {
   setTransitionLabel,
 } from "./core/statePatches";
 import type { StateKind } from "./core/stateDiagram";
-import { autoLayoutAll, placeMissing } from "./core/autoLayout";
+import type { MindmapShape } from "./core/mindmap";
+import {
+  addMindmapChild,
+  addMindmapSibling,
+  deleteMindmapNodes,
+  idAfterSiblingMove,
+  moveMindmapNode,
+  moveMindmapSibling,
+  setMindmapShape,
+  setMindmapText,
+} from "./core/mindmapPatches";
+import { autoLayoutAll, mindmapLayout, placeMissing } from "./core/autoLayout";
 import { CodeEditor, type CodeEditorHandle } from "./ui/CodeEditor";
 import { Canvas, ContextMenu } from "./ui/Canvas";
 import {
@@ -121,9 +132,11 @@ function renameInRoutes(routes: Routes, from: string, to: string): Routes {
 }
 
 const idsOf = (fc: Diagram) =>
-  fc.ok
-    ? { nodes: fc.nodes.map((n) => n.id), routes: routeKeys(fc).values() }
-    : undefined;
+  !fc.ok
+    ? undefined
+    : fc.kind === "mindmap"
+      ? { nodes: [], routes: [] } // laid out from the text, nothing to store
+      : { nodes: fc.nodes.map((n) => n.id), routes: routeKeys(fc).values() };
 
 export function App() {
   const initial = useMemo(() => {
@@ -151,6 +164,8 @@ export function App() {
   const [needsPermission, setNeedsPermission] = useState(false);
   const [autosave, setAutosave] = useState(loadAutosave);
   const [autoEditId, setAutoEditId] = useState<string>();
+  /** Node to select once it appears (mindmap IDs change when nodes move). */
+  const [selectId, setSelectId] = useState<string>();
   const [fitSignal, setFitSignal] = useState(0);
   const [split, setSplit] = useState(38);
   const [notice, setNotice] = useState<string>();
@@ -163,6 +178,10 @@ export function App() {
   const lastGood = useRef<Diagram>(fc);
   if (fc.ok) lastGood.current = fc;
   const shown = fc.ok ? fc : lastGood.current;
+  const canvasLayout = useMemo(
+    () => (shown.kind === "mindmap" ? mindmapLayout(shown) : layout),
+    [shown, layout],
+  );
 
   // Nodes without a stored position get auto-placed once and then keep that position.
   useEffect(() => {
@@ -214,6 +233,7 @@ export function App() {
   const patch = (changes: Change[]) => editor.current?.apply(changes);
 
   const onAddNode = (pos: Pos) => {
+    if (fc.kind === "mindmap") return onMindmapAdd(undefined, "child");
     const id =
       fc.kind === "class"
         ? nextClassId(fc)
@@ -232,6 +252,7 @@ export function App() {
   };
   const onRename = (id: string, label: string) => {
     if (fc.kind === "flowchart") return patch(renameNode(fc, id, label));
+    if (fc.kind === "mindmap") return patch(setMindmapText(fc, id, label));
     const r =
       fc.kind === "state"
         ? renameState(code, fc, id, label)
@@ -260,10 +281,12 @@ export function App() {
       if (t) patch(setTransitionLabel(code, t, label));
       return;
     }
+    if (fc.kind === "mindmap") return; // mindmap edges have no labels
     const edge = fc.edges.find((e) => e.id === edgeId);
     if (edge) patch(setEdgeLabel(fc, edge, label));
   };
   const onConnect = (from: string, to: string) => {
+    if (fc.kind === "mindmap") return; // the tree comes from indentation
     if (fc.kind === "state") {
       const r = addTransition(code, fc, from, to);
       if (r.error) return setNotice(r.error);
@@ -275,7 +298,12 @@ export function App() {
         : addEdge(code, fc, from, to),
     );
   };
-  const onDelete = (nodeIds: string[], edgeIds: string[]) =>
+  const onDelete = (nodeIds: string[], edgeIds: string[]) => {
+    if (fc.kind === "mindmap") {
+      const r = deleteMindmapNodes(code, fc, nodeIds);
+      if (r.error) setNotice(r.error);
+      return patch(r.changes);
+    }
     patch(
       fc.kind === "class"
         ? deleteClassElements(code, fc, nodeIds, edgeIds)
@@ -283,10 +311,35 @@ export function App() {
           ? deleteStateElements(code, fc, nodeIds, edgeIds)
           : deleteElements(code, fc, nodeIds, edgeIds),
     );
+  };
   const onStateKind = (id: string, kind: Exclude<StateKind, "start" | "end">) =>
     fc.kind === "state" && patch(setStateKind(code, fc, id, kind));
   const onConnectPseudo = (id: string, which: "start" | "end") =>
     fc.kind === "state" && patch(connectPseudo(code, fc, id, which));
+  const onMindmapAdd = (id: string | undefined, as: "child" | "sibling") => {
+    if (fc.kind !== "mindmap") return;
+    const r =
+      as === "sibling" && id
+        ? addMindmapSibling(code, fc, id)
+        : addMindmapChild(code, fc, id);
+    setAutoEditId(r.id);
+    patch(r.changes);
+  };
+  const onMindmapShape = (id: string, shape: MindmapShape) =>
+    fc.kind === "mindmap" && patch(setMindmapShape(fc, id, shape));
+  const onMindmapMove = (id: string, parentId: string) => {
+    if (fc.kind !== "mindmap") return;
+    const r = moveMindmapNode(code, fc, id, parentId);
+    if (r.error) return setNotice(r.error);
+    patch(r.changes);
+  };
+  const onMindmapReorder = (id: string, delta: -1 | 1) => {
+    if (fc.kind !== "mindmap") return;
+    const changes = moveMindmapSibling(code, fc, id, delta);
+    if (!changes.length) return;
+    setSelectId(idAfterSiblingMove(fc, id, delta));
+    patch(changes);
+  };
   const onMember = (id: string, index: number, text: string | null) =>
     fc.kind === "class" && patch(editMember(code, fc, id, index, text));
   const onAddMember = (id: string, text: string) =>
@@ -698,6 +751,14 @@ export function App() {
               <span className="context-menu-name">State diagram</span>
               <code>stateDiagram-v2</code>
             </button>
+            <button
+              role="menuitem"
+              className="context-menu-item"
+              onClick={() => doNew("mindmap")}
+            >
+              <span className="context-menu-name">Mindmap</span>
+              <code>mindmap</code>
+            </button>
           </ContextMenu>
         )}
         <button onClick={doOpen} title="Open (⌘O)">
@@ -712,7 +773,15 @@ export function App() {
           </button>
         )}
         <span className="sep" />
-        <button onClick={doAutoLayout} disabled={!fc.ok}>
+        <button
+          onClick={doAutoLayout}
+          disabled={!fc.ok || fc.kind === "mindmap"}
+          title={
+            fc.kind === "mindmap"
+              ? "Mindmaps are always laid out automatically"
+              : undefined
+          }
+        >
           Auto-layout
         </button>
         <span className="sep" />
@@ -835,10 +904,12 @@ export function App() {
           <ReactFlowProvider>
             <Canvas
               fc={shown}
-              layout={layout}
+              layout={canvasLayout}
               routes={routes}
               readOnly={!fc.ok}
               autoEditId={autoEditId}
+              selectId={selectId}
+              onSelectDone={() => setSelectId(undefined)}
               fitSignal={fitSignal}
               onMove={onMove}
               onRename={onRename}
@@ -855,6 +926,10 @@ export function App() {
               onAddNode={onAddNode}
               onDelete={onDelete}
               onAutoEditDone={() => setAutoEditId(undefined)}
+              onMindmapAdd={onMindmapAdd}
+              onMindmapShape={onMindmapShape}
+              onMindmapMove={onMindmapMove}
+              onMindmapReorder={onMindmapReorder}
             />
           </ReactFlowProvider>
           {!fc.ok && (
@@ -884,6 +959,14 @@ export function App() {
               <kbd>Double-click</kbd> to rename · <kbd>Right-click</kbd> for
               type / start / end · <kbd>Drag</kbd> handle to connect ·{" "}
               <kbd>⌫</kbd> delete
+            </div>
+          )}
+          {fc.ok && fc.kind === "mindmap" && (
+            <div className="hint">
+              <kbd>Tab</kbd> add child · <kbd>Enter</kbd> add sibling ·{" "}
+              <kbd>Double-click</kbd> to rename · <kbd>Drag</kbd> onto a node to
+              move · <kbd>⌥↑↓</kbd> reorder · <kbd>Right-click</kbd> for shape ·{" "}
+              <kbd>⌫</kbd> delete branch
             </div>
           )}
         </section>

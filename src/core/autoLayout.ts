@@ -13,6 +13,7 @@ import dagre from "@dagrejs/dagre";
 import type { FlowNode } from "./flowchart";
 import { displayMember, type ClassNode } from "./classDiagram";
 import type { StateNode } from "./stateDiagram";
+import type { Mindmap, MindmapNode } from "./mindmap";
 import type { Diagram } from "./diagram";
 import type { Direction } from "./flowchart";
 import type { Layout, Pos } from "./layoutBlock";
@@ -102,11 +103,113 @@ export function stateNodeSize(
   }
 }
 
+/** Size of a mindmap node. The root is set in a larger font. */
+export function mindmapNodeSize(
+  node: Pick<MindmapNode, "label" | "shape" | "depth">,
+): Size {
+  const lines = node.label.split(/<br\s*\/?>|\n/i);
+  const longest = Math.max(...lines.map((l) => l.length), 1);
+  const root = node.depth === 0;
+  const textW = longest * (root ? 9 : 7.6);
+  const textH = (root ? 24 : 20) * lines.length;
+  switch (node.shape) {
+    case "default":
+      return { w: Math.max(48, Math.round(textW + 24)), h: textH + 14 };
+    case "circle": {
+      const d = Math.max(Math.round(textW * 0.9 + 24), textH + 28, 56);
+      return { w: d, h: d };
+    }
+    case "bang":
+    case "cloud":
+      return {
+        w: Math.max(80, Math.round(textW * 1.25 + 40)),
+        h: Math.max(56, Math.round(textH * 1.6 + 24)),
+      };
+    case "hexagon":
+      return { w: Math.max(64, Math.round(textW + 52)), h: textH + 22 };
+    default:
+      return { w: Math.max(56, Math.round(textW + 32)), h: textH + 22 };
+  }
+}
+
+/** Gaps of the mindmap layout: between a node and its children, and between sibling branches. */
+export const MINDMAP_GAP = { x: 48, y: 12 } as const;
+
+/**
+ * Lays out a mindmap like a tree growing to both sides of the root: the first
+ * branches (by height) go right, the rest left, each read top to bottom in
+ * source order. Every parent sits vertically centered on its children.
+ * Positions are a pure function of the text, so they are not stored (README:
+ * "mindmaps are laid out automatically").
+ */
+export function mindmapLayout(d: Mindmap): Layout {
+  const root = d.nodes[0];
+  if (!root) return {};
+  const byId = new Map(d.nodes.map((n) => [n.id, n]));
+  const size = new Map(d.nodes.map((n) => [n.id, mindmapNodeSize(n)]));
+  const heights = new Map<string, number>();
+  const height = (id: string): number => {
+    let h = heights.get(id);
+    if (h === undefined) {
+      const kids = byId.get(id)!.children;
+      const kidsH = kids.reduce((s, k) => s + height(k), 0);
+      h = Math.max(
+        size.get(id)!.h,
+        kidsH + Math.max(0, kids.length - 1) * MINDMAP_GAP.y,
+      );
+      heights.set(id, h);
+    }
+    return h;
+  };
+
+  const out: Layout = {};
+  const rs = size.get(root.id)!;
+  out[root.id] = { x: -Math.round(rs.w / 2), y: -Math.round(rs.h / 2) };
+
+  /** Stacks `ids` beside the node at `parent`, centered on its middle. */
+  const place = (ids: string[], parent: Pos, ps: Size, side: 1 | -1) => {
+    const total =
+      ids.reduce((s, k) => s + height(k), 0) +
+      Math.max(0, ids.length - 1) * MINDMAP_GAP.y;
+    let y = parent.y + ps.h / 2 - total / 2;
+    for (const id of ids) {
+      const s = size.get(id)!;
+      const h = height(id);
+      const pos = {
+        x: Math.round(
+          side > 0
+            ? parent.x + ps.w + MINDMAP_GAP.x
+            : parent.x - MINDMAP_GAP.x - s.w,
+        ),
+        y: Math.round(y + h / 2 - s.h / 2),
+      };
+      out[id] = pos;
+      place(byId.get(id)!.children, pos, s, side);
+      y += h + MINDMAP_GAP.y;
+    }
+  };
+
+  // Fill the right side until it holds about half of the height.
+  const kids = root.children;
+  const total = kids.reduce((s, k) => s + height(k), 0);
+  let right = 0;
+  let acc = 0;
+  while (
+    right < kids.length &&
+    (right === 0 || acc + height(kids[right]) / 2 <= total / 2)
+  )
+    acc += height(kids[right++]);
+  place(kids.slice(0, right), out[root.id], rs, 1);
+  place(kids.slice(right), out[root.id], rs, -1);
+  return out;
+}
+
 /** Size of any diagram node. */
 export function sizeOf(
-  node: FlowNode | ClassNode | StateNode,
+  node: FlowNode | ClassNode | StateNode | MindmapNode,
   direction?: Direction,
 ): Size {
+  if ("branch" in node) return mindmapNodeSize(node);
   if ("members" in node) return classNodeSize(node);
   if ("descriptions" in node) return stateNodeSize(node, direction);
   return nodeSize(node);
@@ -139,11 +242,13 @@ function dagreLayout(fc: Diagram): Layout {
 }
 
 export function autoLayoutAll(fc: Diagram): Layout {
+  if (fc.kind === "mindmap") return mindmapLayout(fc);
   return fc.nodes.length ? dagreLayout(fc) : {};
 }
 
 /** Returns positions for the nodes that don't have one yet (empty if none are missing). */
 export function placeMissing(fc: Diagram, layout: Layout): Layout {
+  if (fc.kind === "mindmap") return {}; // laid out from the text, never stored
   const missing = fc.nodes.filter((n) => !layout[n.id]);
   if (missing.length === 0) return {};
   const placedCount = fc.nodes.length - missing.length;

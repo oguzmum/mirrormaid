@@ -29,7 +29,7 @@ So I want a tool where I can edit a diagram visually AND as Mermaid code, and bo
 
 1. **MVP: flowchart only.** Nodes and edges, rename/add/delete in both views, positions saved. One diagram per file. ✅
 2. Export PNG / SVG
-3. More diagram types, one at a time: class ✅ → state ✅ → ER → sequence → mindmap. Free positioning may not make sense for every type (e.g. sequence diagrams are ordered by their code, mindmaps are laid out automatically).
+3. More diagram types, one at a time: class ✅ → state ✅ → mindmap ✅ → ER → sequence. Free positioning may not make sense for every type (e.g. sequence diagrams are ordered by their code). Mindmaps are laid out automatically from their structure, so no positions are stored for them.
 4. Multiple sheets per file, each sheet holding one diagram. This changes the file format, so it needs its own ADR.
 5. PDF export
 

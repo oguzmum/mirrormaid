@@ -25,6 +25,15 @@
   --shadow: 0 1px 2px rgb(0 0 0 / 0.05);
   --shadow-md: 0 4px 12px rgb(0 0 0 / 0.08), 0 1px 3px rgb(0 0 0 / 0.06);
   --radius: 6px;
+  /* Mindmap branch colors */
+  --mm-0: #2563eb;
+  --mm-1: #db2777;
+  --mm-2: #059669;
+  --mm-3: #d97706;
+  --mm-4: #7c3aed;
+  --mm-5: #0891b2;
+  --mm-6: #dc2626;
+  --mm-7: #65a30d;
   color-scheme: light;
 }
 @media (prefers-color-scheme: dark) {
@@ -54,6 +63,14 @@
     --ok: #4ade80;
     --shadow: 0 1px 2px rgb(0 0 0 / 0.4);
     --shadow-md: 0 4px 12px rgb(0 0 0 / 0.5);
+    --mm-0: #60a5fa;
+    --mm-1: #f472b6;
+    --mm-2: #34d399;
+    --mm-3: #fbbf24;
+    --mm-4: #a78bfa;
+    --mm-5: #22d3ee;
+    --mm-6: #f87171;
+    --mm-7: #a3e635;
     color-scheme: dark;
   }
 }
@@ -833,4 +850,100 @@ input {
   margin: 5px 0;
   background: currentColor;
   border-radius: 1px;
+}
+
+/* --- Mindmaps --------------------------------------------------------------- */
+.mm {
+  --tint: color-mix(in srgb, var(--branch) 12%, var(--node-fill));
+  color: var(--fg);
+}
+.mm .react-flow__handle {
+  opacity: 0 !important;
+  pointer-events: none;
+}
+.mm-default,
+.mm-square,
+.mm-rounded {
+  background: var(--tint);
+  border: 1.5px solid var(--branch);
+}
+.mm-default {
+  border-width: 0 0 3px;
+  border-radius: 6px 6px 2px 2px;
+}
+.mm-square {
+  border-radius: 2px;
+}
+.mm-rounded {
+  border-radius: 12px;
+}
+.mm .shape > * {
+  fill: var(--tint);
+  stroke: var(--branch);
+  stroke-width: 1.5;
+}
+.mm:hover .shape > * {
+  stroke: var(--branch);
+}
+.mm-root {
+  font-size: 15px;
+  font-weight: 600;
+}
+.mm.selected {
+  box-shadow:
+    0 0 0 2px var(--panel),
+    0 0 0 4px var(--accent);
+}
+.mm.selected .shape > * {
+  stroke: var(--accent);
+  stroke-width: 2.5;
+  fill: var(--tint);
+}
+.mm-circle.selected,
+.mm-bang.selected,
+.mm-cloud.selected,
+.mm-hexagon.selected {
+  box-shadow: none;
+}
+.react-flow__node.drop-target .mm {
+  outline: 2px dashed var(--accent);
+  outline-offset: 4px;
+  border-radius: 6px;
+}
+.react-flow__node-mindmap.dragging {
+  opacity: 0.7;
+}
+.mm-icon {
+  --branch: currentColor;
+  --tint: transparent;
+  display: inline-flex;
+  flex: none;
+  width: 26px;
+  height: 16px;
+  box-sizing: border-box;
+}
+.mm-icon .shape {
+  position: static;
+  overflow: visible;
+}
+.mm-icon .shape > * {
+  fill: none;
+  stroke-width: 1.25;
+}
+.mm-icon.mm-default {
+  border-width: 0 0 2px;
+  background: none;
+}
+.mm-icon.mm-square,
+.mm-icon.mm-rounded {
+  border-width: 1.25px;
+  background: none;
+}
+.context-menu-item kbd {
+  font:
+    11px ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    monospace;
+  color: var(--muted);
 }

@@ -6,8 +6,9 @@
 import { parseFlowchart, type Flowchart } from "./flowchart";
 import { parseClassDiagram, type ClassDiagram } from "./classDiagram";
 import { parseStateDiagram, type StateDiagram } from "./stateDiagram";
+import { parseMindmap, type Mindmap } from "./mindmap";
 
-export type Diagram = Flowchart | ClassDiagram | StateDiagram;
+export type Diagram = Flowchart | ClassDiagram | StateDiagram | Mindmap;
 export type DiagramKind = Diagram["kind"];
 
 /** What layout and routing need from any diagram: nodes and edges by ID. */
@@ -23,6 +24,7 @@ export function diagramKind(text: string): DiagramKind {
     if (line === "" || line.startsWith("%%")) continue;
     if (/^classDiagram\b/.test(line)) return "class";
     if (/^stateDiagram\b/.test(line)) return "state";
+    if (/^mindmap\b/.test(line)) return "mindmap";
     return "flowchart";
   }
   return "flowchart";
@@ -34,6 +36,8 @@ export function parseDiagram(text: string): Diagram {
       return parseClassDiagram(text);
     case "state":
       return parseStateDiagram(text);
+    case "mindmap":
+      return parseMindmap(text);
     default:
       return parseFlowchart(text);
   }
@@ -57,5 +61,14 @@ export const TEMPLATES: Record<DiagramKind, string> = {
     Idle --> Busy : start
     Busy --> Idle : done
     Busy --> [*]
+`,
+  mindmap: `mindmap
+  root((Project))
+    Goals
+      Fast sketching
+      Readable code
+    Risks
+      Scope creep
+    Ideas
 `,
 };

@@ -18,6 +18,7 @@ flowchart TB
         Canvas["Canvas.tsx<br/>React Flow"]
         ClassNode["ClassNode.tsx<br/>UML class box, relation markers"]
         StateNode["StateNode.tsx<br/>state box, start/end, choice, fork/join"]
+        MindmapNode["MindmapNode.tsx<br/>mindmap shapes, branch-colored edges"]
         FileIO["fileIO.ts<br/>File System Access API"]
         FileStore["fileStore.ts<br/>remembers open file (IndexedDB)"]
         Check["useMermaidCheck.ts<br/>lazy mermaid.parse"]
@@ -31,8 +32,10 @@ flowchart TB
         ClassPatches["classPatches.ts<br/>UI action → text changes"]
         StateParser["stateDiagram.ts<br/>span-aware parser"]
         StatePatches["statePatches.ts<br/>UI action → text changes"]
+        MindmapParser["mindmap.ts<br/>span-aware parser (indentation tree)"]
+        MindmapPatches["mindmapPatches.ts<br/>UI action → text changes"]
         Block["layoutBlock.ts<br/>split / join layout block"]
-        Auto["autoLayout.ts<br/>place missing nodes"]
+        Auto["autoLayout.ts<br/>place missing nodes, mindmap tree layout"]
     end
 
     subgraph Libs["external libraries"]
@@ -51,26 +54,33 @@ flowchart TB
     App --> Patches
     App --> ClassPatches
     App --> StatePatches
+    App --> MindmapPatches
     App --> Block
     App --> Auto
 
     Diagram --> Parser
     Diagram --> ClassParser
     Diagram --> StateParser
+    Diagram --> MindmapParser
     Patches --> Parser
     ClassPatches --> ClassParser
     ClassPatches --> Patches
     StatePatches --> StateParser
     StatePatches --> Patches
+    MindmapPatches --> MindmapParser
+    MindmapPatches --> Patches
     Auto --> Diagram
     Canvas --> ClassNode
     Canvas --> StateNode
+    Canvas --> MindmapNode
     Auto --> Dagre
     Canvas --> Auto
     Editor --> CM
     Canvas --> RF
     Check -.->|loaded on demand| Mermaid
 ```
+
+Mindmaps are the exception to ADR-002: their layout is a pure function of the text (`mindmapLayout` in `autoLayout.ts`), so they write no layout block. Their node IDs are positions in the text (`n0` is the root), and dragging a node onto another one moves its branch in the code instead of storing a position.
 
 `mermaid.js` is only used to check "would GitHub render this?". It doesn't draw anything, because Mermaid can't place nodes at fixed positions and its parser has no source spans (see ADR-001, ADR-002).
 

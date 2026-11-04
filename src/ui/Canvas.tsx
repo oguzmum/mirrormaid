@@ -24,6 +24,7 @@ import { SHAPE_DELIMS, type Shape } from "../core/flowchart";
 import { relationType, type RelationType } from "../core/classDiagram";
 import type { Diagram } from "../core/diagram";
 import { isPseudo, type StateKind } from "../core/stateDiagram";
+import { subtreeIds, type MindmapShape } from "../core/mindmap";
 import {
   routeKeys,
   type Layout,
@@ -36,6 +37,12 @@ import {
   sizeOf,
   stateNodeSize,
 } from "../core/autoLayout";
+import {
+  MindmapEdgeView,
+  MindmapNodeView,
+  MindmapShapeItems,
+  mindmapData,
+} from "./MindmapNode";
 import { StateKindItems, StateNodeView, stateData } from "./StateNode";
 import {
   AnnotationItems,
@@ -60,6 +67,9 @@ export interface CanvasProps {
   readOnly: boolean;
   /** Node that should open its label editor as soon as it appears. */
   autoEditId?: string;
+  /** Node that should become the selection as soon as it appears. */
+  selectId?: string;
+  onSelectDone(): void;
   /** Bump to trigger fitView. */
   fitSignal: number;
   onMove(positions: Layout): void;
@@ -79,6 +89,12 @@ export interface CanvasProps {
   onAddNode(pos: Pos): void;
   onDelete(nodeIds: string[], edgeIds: string[]): void;
   onAutoEditDone(): void;
+  /** Adds a node to a mindmap: a child of `id` (the root if undefined) or a sibling. */
+  onMindmapAdd(id: string | undefined, as: "child" | "sibling"): void;
+  onMindmapShape(id: string, shape: MindmapShape): void;
+  /** Moves a mindmap node with its branch under `parentId`. */
+  onMindmapMove(id: string, parentId: string): void;
+  onMindmapReorder(id: string, delta: -1 | 1): void;
 }
 
 type ShapeData = { label: string; shape: Shape; w: number; h: number };
@@ -97,7 +113,20 @@ export function Canvas(props: CanvasProps) {
   const [nodes, setNodes] = useState<Node[]>([]);
   const [edges, setEdges] = useState<Edge<EdgeData>[]>([]);
   const [editingEdge, setEditingEdge] = useState<string>();
+  /**
+   * `autoEditId`, handed to the nodes only once React Flow shows the new
+   * nodes (it takes them over one render later). In a mindmap IDs are
+   * positions in the text, so until then the ID still belongs to the node
+   * that was there before.
+   */
+  const [editId, setEditId] = useState<string>();
+  const pendingEdit = useRef<string>(undefined);
+  /** Bumped to snap dragged mindmap nodes back to their computed place. */
+  const [resetTick, setResetTick] = useState(0);
+  const [dropTarget, setDropTarget] = useState<string>();
   const connectFrom = useRef<string>(undefined);
+  const host = useRef<HTMLDivElement>(null);
+  const mindmap = fc.kind === "mindmap";
   const [menu, setMenu] = useState<{
     kind: "node" | "edge";
     id: string;
@@ -107,8 +136,21 @@ export function Canvas(props: CanvasProps) {
 
   // Derive React Flow state from the parsed text + layout, keeping the selection.
   useEffect(() => {
+    const exists = (id?: string) => !!id && fc.nodes.some((n) => n.id === id);
+    const editing = props.autoEditId;
+    pendingEdit.current = exists(editing) ? editing : undefined;
+    if (!pendingEdit.current) setEditId(undefined);
+    // A node that is about to be edited (or asked for) becomes the only selected one.
+    const pick = exists(editing)
+      ? editing
+      : exists(props.selectId)
+        ? props.selectId
+        : undefined;
+    if (props.selectId && pick === props.selectId) props.onSelectDone();
     setNodes((prev) => {
-      const selected = new Set(prev.filter((n) => n.selected).map((n) => n.id));
+      const selected = pick
+        ? new Set([pick])
+        : new Set(prev.filter((n) => n.selected).map((n) => n.id));
       return fc.nodes.map((n): Node => {
         const size = sizeOf(n, fc.direction);
         const common = {
@@ -116,6 +158,14 @@ export function Canvas(props: CanvasProps) {
           position: layout[n.id] ?? { x: 0, y: 0 },
           selected: selected.has(n.id),
         };
+        if ("branch" in n)
+          return {
+            ...common,
+            type: "mindmap",
+            // Without the root the children would all be roots.
+            deletable: n.depth > 0,
+            data: mindmapData(n, size.w, size.h),
+          };
         if ("descriptions" in n)
           return {
             ...common,
@@ -158,6 +208,22 @@ export function Canvas(props: CanvasProps) {
           markerEnd: r.toMarker && markerId(r.toMarker),
         }));
       }
+      if (fc.kind === "mindmap") {
+        const byId = new Map(fc.nodes.map((n) => [n.id, n]));
+        return fc.edges.map((e) => ({
+          id: e.id,
+          source: e.from,
+          target: e.to,
+          type: "mindmap",
+          selectable: false,
+          deletable: false,
+          focusable: false,
+          data: {
+            branch: byId.get(e.to)!.branch,
+            depth: byId.get(e.from)!.depth,
+          },
+        })) as unknown as Edge<EdgeData>[];
+      }
       if (fc.kind === "state") {
         return fc.edges.map((t): Edge<EdgeData> => ({
           id: t.id,
@@ -196,7 +262,77 @@ export function Canvas(props: CanvasProps) {
         };
       });
     });
-  }, [fc, layout, routes]);
+  }, [fc, layout, routes, props.autoEditId, props.selectId, resetTick]);
+  useEffect(() => {
+    if (!pendingEdit.current) return;
+    setEditId(pendingEdit.current);
+    pendingEdit.current = undefined;
+  }, [nodes]);
+
+  // --- Mindmap: drop a node onto another to move its branch there ---------------
+  /** The node under the pointer that `dragged` could move to, if any. */
+  const dropTargetAt = (e: MouseEvent | TouchEvent, dragged: string) => {
+    if (fc.kind !== "mindmap") return undefined;
+    const pt = "touches" in e ? e.changedTouches[0] : e;
+    const p = rf.screenToFlowPosition({ x: pt.clientX, y: pt.clientY });
+    const own = subtreeIds(fc, dragged);
+    return fc.nodes.find((n) => {
+      const at = layout[n.id];
+      if (!at || own.has(n.id)) return false;
+      const s = sizeOf(n);
+      return (
+        p.x >= at.x && p.x <= at.x + s.w && p.y >= at.y && p.y <= at.y + s.h
+      );
+    })?.id;
+  };
+  useEffect(() => {
+    setNodes((ns) =>
+      ns.map((n) => {
+        const className = n.id === dropTarget ? "drop-target" : undefined;
+        return n.className === className ? n : { ...n, className };
+      }),
+    );
+  }, [dropTarget]);
+
+  // --- Mindmap keyboard: Tab child, Enter sibling, Alt+↑/↓ reorder ---------------
+  const latest = useRef({ nodes, props, readOnly });
+  latest.current = { nodes, props, readOnly };
+  useEffect(() => {
+    if (!mindmap) return;
+    const onKey = (e: KeyboardEvent) => {
+      const { nodes, props, readOnly } = latest.current;
+      const active = document.activeElement;
+      // Only when the canvas (or nothing) has focus, never while typing.
+      if (
+        readOnly ||
+        e.metaKey ||
+        e.ctrlKey ||
+        (active &&
+          active !== document.body &&
+          !host.current?.contains(active)) ||
+        active instanceof HTMLInputElement
+      )
+        return;
+      const sel = nodes.filter((n) => n.selected);
+      if (sel.length !== 1) return;
+      const id = sel[0].id;
+      if (e.key === "Tab" && !e.altKey) {
+        e.preventDefault();
+        props.onMindmapAdd(id, "child");
+      } else if (e.key === "Enter" && !e.altKey) {
+        e.preventDefault();
+        props.onMindmapAdd(id, "sibling");
+      } else if (e.key === "F2") {
+        e.preventDefault();
+        setEditId(id);
+      } else if (e.altKey && (e.key === "ArrowUp" || e.key === "ArrowDown")) {
+        e.preventDefault();
+        props.onMindmapReorder(id, e.key === "ArrowUp" ? -1 : 1);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [mindmap]);
 
   const firstFit = useRef(true);
   useEffect(() => {
@@ -211,7 +347,7 @@ export function Canvas(props: CanvasProps) {
   const ctx: Ctx = {
     direction: fc.direction,
     readOnly,
-    autoEditId: props.autoEditId,
+    autoEditId: editId,
     editingEdge,
     setEditingEdge,
     onRename: props.onRename,
@@ -220,12 +356,16 @@ export function Canvas(props: CanvasProps) {
     onEdgeLabel: props.onEdgeLabel,
     onRoute: props.onRoute,
     toFlow: (x, y) => rf.screenToFlowPosition({ x, y }),
-    onAutoEditDone: props.onAutoEditDone,
+    onAutoEditDone: () => {
+      setEditId(undefined);
+      props.onAutoEditDone();
+    },
   };
 
   return (
     <CanvasCtx.Provider value={ctx}>
       <div
+        ref={host}
         className={`canvas${readOnly ? " readonly" : ""}`}
         onDoubleClick={(e) => {
           if (
@@ -233,6 +373,7 @@ export function Canvas(props: CanvasProps) {
             !(e.target as HTMLElement).classList.contains("react-flow__pane")
           )
             return;
+          if (mindmap) return props.onMindmapAdd(undefined, "child");
           const p = rf.screenToFlowPosition({ x: e.clientX, y: e.clientY });
           const s =
             fc.kind === "class"
@@ -253,7 +394,18 @@ export function Canvas(props: CanvasProps) {
           edgeTypes={edgeTypes}
           onNodesChange={(c) => setNodes((ns) => applyNodeChanges(c, ns))}
           onEdgesChange={(c) => setEdges((es) => applyEdgeChanges(c, es))}
-          onNodeDragStop={(_, __, dragged) => {
+          onNodeDrag={(e, node) =>
+            mindmap && setDropTarget(dropTargetAt(e, node.id))
+          }
+          onNodeDragStop={(e, node, dragged) => {
+            if (mindmap) {
+              const target = dropTargetAt(e, node.id);
+              setDropTarget(undefined);
+              setResetTick((t) => t + 1);
+              if (target && dragged.length === 1)
+                props.onMindmapMove(node.id, target);
+              return;
+            }
             const moved: Layout = {};
             for (const n of dragged)
               moved[n.id] = {
@@ -293,7 +445,8 @@ export function Canvas(props: CanvasProps) {
           onMoveStart={() => setMenu(undefined)}
           onEdgeDoubleClick={(_, e) => !readOnly && setEditingEdge(e.id)}
           nodesDraggable={!readOnly}
-          nodesConnectable={!readOnly}
+          nodesConnectable={!readOnly && !mindmap}
+          disableKeyboardA11y={mindmap}
           elementsSelectable={!readOnly}
           deleteKeyCode={readOnly ? null : ["Backspace", "Delete"]}
           connectionMode={ConnectionMode.Loose}
@@ -323,6 +476,69 @@ export function Canvas(props: CanvasProps) {
             />
           </ContextMenu>
         )}
+        {menu?.kind === "node" &&
+          fc.kind === "mindmap" &&
+          (() => {
+            const n = fc.nodes.find((n) => n.id === menu.id);
+            if (!n) return null;
+            const close = () => setMenu(undefined);
+            const siblings = n.parent
+              ? fc.nodes.find((p) => p.id === n.parent)!.children
+              : [];
+            const i = siblings.indexOf(n.id);
+            const item = (
+              name: string,
+              keys: string,
+              run: () => void,
+              disabled = false,
+            ) => (
+              <button
+                role="menuitem"
+                className="context-menu-item"
+                disabled={disabled}
+                onClick={() => {
+                  close();
+                  run();
+                }}
+              >
+                <span className="context-menu-name">{name}</span>
+                <kbd>{keys}</kbd>
+              </button>
+            );
+            return (
+              <ContextMenu x={menu.x} y={menu.y} title="Shape" onClose={close}>
+                <MindmapShapeItems
+                  current={n.shape}
+                  onPick={(shape) => {
+                    close();
+                    props.onMindmapShape(n.id, shape);
+                  }}
+                />
+                <div className="context-menu-sep" />
+                {item("Add child", "Tab", () =>
+                  props.onMindmapAdd(n.id, "child"),
+                )}
+                {item(
+                  "Add sibling",
+                  "Enter",
+                  () => props.onMindmapAdd(n.id, "sibling"),
+                  !n.parent,
+                )}
+                {item(
+                  "Move up",
+                  "⌥↑",
+                  () => props.onMindmapReorder(n.id, -1),
+                  i <= 0,
+                )}
+                {item(
+                  "Move down",
+                  "⌥↓",
+                  () => props.onMindmapReorder(n.id, 1),
+                  i < 0 || i === siblings.length - 1,
+                )}
+              </ContextMenu>
+            );
+          })()}
         {menu?.kind === "node" && fc.kind === "class" && (
           <ContextMenu
             x={menu.x}
@@ -385,7 +601,7 @@ export function Canvas(props: CanvasProps) {
               </ContextMenu>
             );
           })()}
-        {menu?.kind === "edge" && (
+        {menu?.kind === "edge" && !mindmap && (
           <ContextMenu
             x={menu.x}
             y={menu.y}
@@ -999,5 +1215,6 @@ const nodeTypes = {
   shape: ShapeNode,
   class: ClassNodeView,
   state: StateNodeView,
+  mindmap: MindmapNodeView,
 };
-const edgeTypes = { label: LabelEdge };
+const edgeTypes = { label: LabelEdge, mindmap: MindmapEdgeView };
